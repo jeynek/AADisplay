@@ -64,16 +64,15 @@ class CoreManagerService private constructor(): ICoreManager.Stub() {
 
         private fun sanitizeDisplayProfile(width: Int, height: Int, densityDpi: Int): DisplayProfile {
             return DisplayProfile(
-                width = width.coerceAtLeast(1),
-                height = height.coerceAtLeast(1),
-                densityDpi = densityDpi.coerceAtLeast(1)
+                width = width.coerceAtLeast(100),
+                height = height.coerceAtLeast(100),
+                densityDpi = densityDpi.coerceAtLeast(120)
             )
         }
 
         /**
-         * Lock profile per active AA display session.
-         * - New display session: (re)learn from current size.
-         * - Reconnect within same session: keep locked size unless orientation flips.
+         * Lock profile per active AA display session, but dynamically update when
+         * Android Auto reports actual surface dimensions / density changes.
          */
         private fun resolveDisplayProfile(
             width: Int,
@@ -88,29 +87,13 @@ class CoreManagerService private constructor(): ICoreManager.Stub() {
                 log(TAG, "displayProfile locked: ${candidate.width}*${candidate.height},${candidate.densityDpi}")
                 return candidate
             }
-            if (newSession) {
-                if (current != candidate) {
-                    mLockedDisplayProfile = candidate
-                    log(
-                        TAG,
-                        "displayProfile relocked(new-session): ${current.width}*${current.height},${current.densityDpi} -> ${candidate.width}*${candidate.height},${candidate.densityDpi}"
-                    )
-                }
-                return mLockedDisplayProfile!!
-            }
-            if (current.isLandscape != candidate.isLandscape) {
+            if (current != candidate) {
                 mLockedDisplayProfile = candidate
                 log(
                     TAG,
-                    "displayProfile relocked(orientation): ${current.width}*${current.height},${current.densityDpi} -> ${candidate.width}*${candidate.height},${candidate.densityDpi}"
+                    "displayProfile updated: ${current.width}*${current.height},${current.densityDpi} -> ${candidate.width}*${candidate.height},${candidate.densityDpi} (newSession=$newSession)"
                 )
                 return candidate
-            }
-            if (current != candidate) {
-                log(
-                    TAG,
-                    "displayProfile keep-locked(reconnect): locked=${current.width}*${current.height},${current.densityDpi}, incoming=${candidate.width}*${candidate.height},${candidate.densityDpi}"
-                )
             }
             return current
         }
@@ -218,7 +201,7 @@ class CoreManagerService private constructor(): ICoreManager.Stub() {
             mAaVirtualDisplayAdapter?.apply {
                 onReconnected(profile.width, profile.height, profile.densityDpi)
                 setSurface(surface)
-                mDisplayWindow?.onResume(profile.width, profile.height)
+                mDisplayWindow?.onResume(profile.width, profile.height, profile.densityDpi)
                 listener.onAvailableDisplay(this.mDisplayId, false)
                 return@runMain
             }

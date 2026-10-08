@@ -338,9 +338,10 @@ class DisplayWindow(
         }
     }
 
-    suspend fun onResume(width: Int, height: Int){
+    suspend fun onResume(width: Int, height: Int, densityDpi: Int = mDensityDpi){
         mDisplayWidth = width
         mDisplayHeight = height
+        mDensityDpi = densityDpi
         mMirrorBinding?.tvVirtualDisplayInfo?.text = "$mDisplayWidth*$mDisplayHeight,$mDensityDpi"
         interactiveMonitor.init()
         mDestroyJob?.cancelAndJoin()

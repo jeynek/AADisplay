@@ -6,6 +6,7 @@ import android.graphics.SurfaceTexture
 import android.os.SystemClock
 import android.support.car.Car
 import android.support.car.CarConnectionCallback
+import android.util.DisplayMetrics
 import android.util.Log
 import android.view.*
 import androidx.core.content.ContextCompat
@@ -39,6 +40,8 @@ class AaMainFragment : BaseFragment<FragmentAaMainBinding>(FragmentAaMainBinding
     private var isDisplayCreateRequested = false
     private var isControlReceiverRegistered = false
     private var displaySurface: Surface? = null
+    private var currentVirtualWidth = 0
+    private var currentVirtualHeight = 0
     private lateinit var config: SharedPreferences
 
     private var car:Car? = null
@@ -137,7 +140,7 @@ class AaMainFragment : BaseFragment<FragmentAaMainBinding>(FragmentAaMainBinding
         Log.i(TAG, "initViews")
         baseBinding.tvDisplay.surfaceTextureListener = this
         baseBinding.tvDisplay.doOnLayout {
-            requestDisplay("layout")
+            requestDisplay("layout", baseBinding.tvDisplay.width, baseBinding.tvDisplay.height)
         }
 
         car?.disconnect()
@@ -179,11 +182,11 @@ class AaMainFragment : BaseFragment<FragmentAaMainBinding>(FragmentAaMainBinding
 
     override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
         Log.i(TAG, "onSurfaceTextureAvailable: ${width}x$height")
-        requestDisplay("surface-available")
+        requestDisplay("surface-available", width, height)
     }
     override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
         Log.i(TAG, "onSurfaceTextureSizeChanged: ${width}x$height")
-        requestDisplay("surface-size")
+        requestDisplay("surface-size", width, height)
     }
     override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
         Log.i(TAG, "onSurfaceTextureDestroyed")
@@ -205,18 +208,25 @@ class AaMainFragment : BaseFragment<FragmentAaMainBinding>(FragmentAaMainBinding
         }
     }
 
-    private fun requestDisplay(reason: String) {
+    private fun requestDisplay(reason: String, explicitWidth: Int = 0, explicitHeight: Int = 0) {
         if (!this::config.isInitialized) return
 
-        val displayWidth = baseBinding.tvDisplay.width
-        val displayHeight = baseBinding.tvDisplay.height
-        val displayDpi = AADisplayConfig.VirtualDisplayDpi.get(config).let {
-            if(it <= 50) resources.displayMetrics.densityDpi
-            else it
+        val displayWidth = if (explicitWidth > 0) explicitWidth else baseBinding.tvDisplay.width
+        val displayHeight = if (explicitHeight > 0) explicitHeight else baseBinding.tvDisplay.height
+
+        val configuredDpi = AADisplayConfig.VirtualDisplayDpi.get(config)
+        val carDpi = resources.displayMetrics.densityDpi
+        val displayDpi = if (configuredDpi > 50) {
+            configuredDpi
+        } else if (carDpi > 50) {
+            carDpi
+        } else {
+            DisplayMetrics.DENSITY_DEFAULT
         }
+
         Log.i(TAG, "requestDisplay[$reason]: ${displayWidth}x$displayHeight,$displayDpi available=${baseBinding.tvDisplay.isAvailable} requested=$isDisplayCreateRequested display=$displayId")
-        if (displayWidth <= 0 || displayHeight <= 0) {
-            Log.e(TAG, "requestDisplay[$reason] skipped: invalid TextureView size ${displayWidth}x$displayHeight")
+        if (displayWidth < 100 || displayHeight < 100) {
+            Log.w(TAG, "requestDisplay[$reason] skipped: invalid TextureView size ${displayWidth}x$displayHeight")
             return
         }
 
@@ -233,6 +243,8 @@ class AaMainFragment : BaseFragment<FragmentAaMainBinding>(FragmentAaMainBinding
         }
 
         isDisplayCreateRequested = true
+        currentVirtualWidth = displayWidth
+        currentVirtualHeight = displayHeight
         CoreApi.onCreateDisplay(displayWidth, displayHeight, displayDpi, surface, displayCreatedListener)
     }
 
@@ -264,22 +276,33 @@ class AaMainFragment : BaseFragment<FragmentAaMainBinding>(FragmentAaMainBinding
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupTouchForwarding() {
-        baseBinding.tvDisplay.setOnTouchListener { _, e ->
+        baseBinding.tvDisplay.setOnTouchListener { v, e ->
             val uptimeMillis = SystemClock.uptimeMillis()
             if (e.action == MotionEvent.ACTION_DOWN) {
                 repairDownTime = uptimeMillis
             }
+            val viewWidth = v.width
+            val viewHeight = v.height
+            val targetWidth = if (currentVirtualWidth > 0) currentVirtualWidth else viewWidth
+            val targetHeight = if (currentVirtualHeight > 0) currentVirtualHeight else viewHeight
+
+            val scaleX = if (viewWidth > 0 && targetWidth > 0) targetWidth.toFloat() / viewWidth.toFloat() else 1.0f
+            val scaleY = if (viewHeight > 0 && targetHeight > 0) targetHeight.toFloat() / viewHeight.toFloat() else 1.0f
+
             val pointerCoords: Array<MotionEvent.PointerCoords?> = arrayOfNulls(e.pointerCount)
             val pointerProperties: Array<MotionEvent.PointerProperties?> = arrayOfNulls(e.pointerCount)
             for (i in 0 until e.pointerCount) {
-                pointerCoords[i] = MotionEvent.PointerCoords().apply {
-                    e.getPointerCoords(i, this)
-                }
-                pointerProperties[i] = MotionEvent.PointerProperties().apply {
-                    e.getPointerProperties(i, this)
-                }
+                val coords = MotionEvent.PointerCoords()
+                e.getPointerCoords(i, coords)
+                coords.x = (coords.x * scaleX).coerceIn(0f, (targetWidth - 1).toFloat().coerceAtLeast(0f))
+                coords.y = (coords.y * scaleY).coerceIn(0f, (targetHeight - 1).toFloat().coerceAtLeast(0f))
+                pointerCoords[i] = coords
+
+                val prop = MotionEvent.PointerProperties()
+                e.getPointerProperties(i, prop)
+                pointerProperties[i] = prop
             }
-            val newEvent = MotionEvent.obtain(repairDownTime, uptimeMillis, e.action, e.pointerCount, pointerProperties, pointerCoords,0,0,1.0f,1.0f,0,0,0,0)
+            val newEvent = MotionEvent.obtain(repairDownTime, uptimeMillis, e.action, e.pointerCount, pointerProperties, pointerCoords, 0, 0, 1.0f, 1.0f, 0, 0, 0, 0)
             newEvent.source = InputDeviceCompat.SOURCE_TOUCHSCREEN
             CoreApi.touch(newEvent)
             newEvent.recycle()
