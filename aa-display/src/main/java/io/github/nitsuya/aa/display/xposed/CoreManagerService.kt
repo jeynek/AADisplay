@@ -52,6 +52,24 @@ class CoreManagerService private constructor(): ICoreManager.Stub() {
         private var mDisplayWindow: DisplayWindow? = null
         private var mAaVirtualDisplayAdapter: AaVirtualDisplayAdapter? = null
         private var mDisplayCreateInProgress = false
+        private val mMainHandler = Handler(Looper.getMainLooper())
+        private var mPendingDestroy: Runnable? = null
+
+        /** Cancel a queued teardown, e.g. because Android Auto reconnected in time. */
+        private fun cancelPendingDestroy() {
+            mPendingDestroy?.let {
+                mMainHandler.removeCallbacks(it)
+                mPendingDestroy = null
+            }
+        }
+
+        private fun destroyDisplayNow() {
+            mAaVirtualDisplayAdapter?.onDestroy()
+            mDisplayWindow = null
+            mAaVirtualDisplayAdapter = null
+            mDisplayCreateInProgress = false
+            clearDisplayProfileLock()
+        }
         private data class DisplayProfile(
             val width: Int,
             val height: Int,
@@ -188,6 +206,7 @@ class CoreManagerService private constructor(): ICoreManager.Stub() {
 
     override fun onCreateDisplay(width: Int, height: Int, densityDpi: Int, surface: Surface?, listener: IVirtualDisplayCreatedListener){
         runMain {
+            cancelPendingDestroy()
             log(
                 TAG,
                 "onCreateDisplay request: ${width}x$height,$densityDpi surface=${surface != null} existing=${mAaVirtualDisplayAdapter != null}"
@@ -247,13 +266,28 @@ class CoreManagerService private constructor(): ICoreManager.Stub() {
 
     override fun onDestroyDisplay(){
         runMain {
-            mDisplayWindow?.onDestroy {
-                mAaVirtualDisplayAdapter?.onDestroy()
-                mDisplayWindow = null
-                mAaVirtualDisplayAdapter = null
-                mDisplayCreateInProgress = false
-                clearDisplayProfileLock()
+            if(mAaVirtualDisplayAdapter == null) return@runMain
+            // Keep the virtual display (and the launcher living on it) alive during the AA
+            // disconnect grace period. Destroying it right away makes Android relocate the
+            // launcher task to the phone display; if AA reconnects in time we reuse the display.
+            val delayMs = AADisplayConfig.DelayDestroyTime.get(config).coerceAtLeast(0) * 1000L
+            log(
+                TAG,
+                "onDestroyDisplay deferred by ${delayMs}ms (display=${mAaVirtualDisplayAdapter?.mDisplayId ?: Display.INVALID_DISPLAY})"
+            )
+            cancelPendingDestroy()
+            val destroy = Runnable {
+                mPendingDestroy = null
+                val window = mDisplayWindow
+                if(window != null) {
+                    // DisplayWindow.onDestroy is suspending, so run it on the main dispatcher.
+                    runMain { window.onDestroy { destroyDisplayNow() } }
+                } else {
+                    destroyDisplayNow()
+                }
             }
+            mPendingDestroy = destroy
+            mMainHandler.postDelayed(destroy, delayMs)
         }
     }
 

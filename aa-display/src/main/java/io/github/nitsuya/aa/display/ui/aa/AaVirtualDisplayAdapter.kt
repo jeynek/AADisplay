@@ -198,6 +198,7 @@ class AaVirtualDisplayAdapter(
             // If no default package is configured, launch Home package as fallback
             startHomeLauncher()
         }
+        rehomeLauncherTasks("connect")
         onVirtualDisplayCreated(mDisplayId)
     }
 
@@ -207,6 +208,7 @@ class AaVirtualDisplayAdapter(
         refreshLauncherPackage("reconnect")
         trackPackage(mLauncherPackage, 0)
         trackPackage(mHomePackage, 0)
+        rehomeLauncherTasks("reconnect")
     }
 
     fun onDestroy() {
@@ -380,8 +382,11 @@ class AaVirtualDisplayAdapter(
             return
         }
         if(mHomeTaskId != null){
-            moveTaskToFront(mHomeTaskId!!)
+            // Move the existing task back onto the virtual display instead of only
+            // bringing it to the front, so an AA reconnect never leaves it on the phone display.
+            moveTaskId(mHomeTaskId!!, true)
         } else {
+            rehomeLauncherTasks("home")
             startActivity(mHomePackage!!, 0)
         }
     }
@@ -396,8 +401,10 @@ class AaVirtualDisplayAdapter(
             return
         }
         if(mLauncherPackageTaskId != null){
-            moveTaskToFront(mLauncherPackageTaskId!!)
+            // Move the existing task back onto the virtual display; see startHomeLauncher().
+            moveTaskId(mLauncherPackageTaskId!!, true)
         } else {
+            rehomeLauncherTasks("launcher")
             startActivity(mLauncherPackage!!, 0)
         }
     }
@@ -573,6 +580,53 @@ class AaVirtualDisplayAdapter(
             log(TAG,"removeTask error:", e)
             false
         }
+    }
+
+    /** Packages that must always live on the AADisplay virtual display. */
+    private fun launcherPackages(): Set<String> = linkedSetOf<String>().apply {
+        mLauncherPackage?.trim()?.takeIf { it.isNotEmpty() }?.let { add(it) }
+        mHomePackage?.trim()?.takeIf { it.isNotEmpty() }?.let { add(it) }
+    }
+
+    fun isLauncherPackage(packageName: String?): Boolean =
+        packageName != null && launcherPackages().contains(packageName)
+
+    /**
+     * Pull the launcher back onto the AADisplay virtual display.
+     *
+     * Android can move the launcher task to the phone display (display 0) while the AA
+     * session churns, for example when its display is detached or after a reconnect. Since the
+     * launcher (and its PiP tasks) must only ever be shown on the virtual display, any launcher
+     * root task found elsewhere is moved back here. The launcher task itself is never removed.
+     */
+    fun rehomeLauncherTasks(reason: String): Boolean {
+        if(mDisplayId == Display.INVALID_DISPLAY) return false
+        val packages = launcherPackages()
+        if(packages.isEmpty()) return false
+        val otherDisplayIds = try {
+            Instances.displayManager.displays.map { it.displayId }
+        } catch (e: Throwable) {
+            log(TAG, "rehomeLauncher[$reason] display lookup failed:", e)
+            listOf(Display.DEFAULT_DISPLAY)
+        }
+        var moved = false
+        otherDisplayIds
+            .filter { it != mDisplayId }
+            .forEach { displayId ->
+                try {
+                    Instances.iActivityTaskManager.getAllRootTaskInfosOnDisplay(displayId).forEach { task ->
+                        val pkg = task.topActivity?.packageName
+                            ?: runCatching { task.getObjectAs("baseActivity", ComponentName::class.java) as? ComponentName }.getOrNull()?.packageName
+                        if(pkg == null || !packages.contains(pkg)) return@forEach
+                        log(TAG, "rehomeLauncher[$reason]: task=${task.taskId} ($pkg) display $displayId -> $mDisplayId")
+                        Instances.iActivityTaskManager.moveRootTaskToDisplay(task.taskId, mDisplayId)
+                        moved = true
+                    }
+                } catch (e: Throwable) {
+                    log(TAG, "rehomeLauncher[$reason] display=$displayId error:", e)
+                }
+            }
+        return moved
     }
 
     /**
@@ -768,7 +822,16 @@ class AaVirtualDisplayAdapter(
         override fun onTaskStackChanged() {}
         override fun onActivityPinned(packageName: String?, userId: Int, taskId: Int, stackId: Int) {}
         override fun onActivityUnpinned() {}
-        override fun onActivityRestartAttempt(task: ActivityManager.RunningTaskInfo?, homeTaskVisible: Boolean, clearedTask: Boolean, wasVisible: Boolean) {}
+        override fun onActivityRestartAttempt(task: ActivityManager.RunningTaskInfo?, homeTaskVisible: Boolean, clearedTask: Boolean, wasVisible: Boolean) {
+            // Android restarts an activity on the default display when the display it lived on
+            // went away. This is the exact path that stranded the launcher on the phone screen,
+            // so move the launcher task back onto the virtual display instead of leaving it there.
+            val info = task ?: return
+            val packageName = info.topActivity?.packageName ?: return
+            if(mDisplayId == Display.INVALID_DISPLAY || !isLauncherPackage(packageName)) return
+            log(TAG, "onActivityRestartAttempt: rehome $packageName (task=${info.taskId}) -> display $mDisplayId")
+            moveTaskId(info.taskId, true)
+        }
         override fun onActivityForcedResizable(packageName: String?, taskId: Int, reason: Int) {}
         override fun onActivityDismissingDockedTask() {}
         override fun onActivityLaunchOnSecondaryDisplayFailed(taskInfo: ActivityManager.RunningTaskInfo?, requestedDisplayId: Int) {}
@@ -815,7 +878,13 @@ class AaVirtualDisplayAdapter(
         override fun onTaskProfileLocked(taskInfo: ActivityManager.RunningTaskInfo?, userId: Int) {}
         override fun onTaskSnapshotChanged(taskId: Int, snapshot: TaskSnapshot?) {}
         override fun onBackPressedOnTaskRoot(taskInfo: ActivityManager.RunningTaskInfo?) {}
-        override fun onTaskDisplayChanged(taskId: Int, newDisplayId: Int) {}
+        override fun onTaskDisplayChanged(taskId: Int, newDisplayId: Int) {
+            if(mDisplayId == Display.INVALID_DISPLAY || newDisplayId == mDisplayId) return
+            // A task left the virtual display; if it was the launcher, pull it back.
+            Handler(Looper.getMainLooper()).post {
+                rehomeLauncherTasks("task-display-changed")
+            }
+        }
         override fun onRecentTaskListUpdated() {}
         override fun onRecentTaskRemovedForAddTask(taskId: Int) {}
         override fun onRecentTaskListFrozenChanged(frozen: Boolean) {}
