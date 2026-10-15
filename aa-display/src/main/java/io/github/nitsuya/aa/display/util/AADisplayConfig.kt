@@ -22,6 +22,13 @@ sealed class AADisplayConfig<T>(val key: String) {
     object DelayDestroyTime: IntConfig("DelayDestroyTime", 180)
     object ScreenOffReplaceLockScreen: BooleanConfig("ScreenOffReplaceLockScreen", false)
     object CloseLauncherDashboard: BooleanConfig("CloseLauncherDashboard", true)
+    /** While the LecoAuto desktop is in full screen: drop the vertical rail and hide the facet bar. */
+    object FullscreenNoRail: BooleanConfig("FullscreenNoRail", true)
+    /**
+     * Optional override of the Android Auto layout resource used in full screen, by resource name
+     * (e.g. "sys_ui_layout_widescreen_lhd"). Empty means: use sys_ui_layout_projected_app.
+     */
+    object FullscreenLayout: StringConfig("FullscreenLayout", null)
     object ForceRightAngle: BooleanConfig("ForceRightAngle", true)
     object DisplayImePolicy: IntConfig("DisplayImePolicy", 0) //WindowManager.DISPLAY_IME_POLICY_LOCAL:0, WindowManager.DISPLAY_IME_POLICY_FALLBACK_DISPLAY:1
     object VoiceAssistShell: StringConfig("VoiceAssistShell", null)

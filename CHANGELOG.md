@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.24.0 (2026-10-08)
+
+### Changed
+- Version updated to:
+  - `versionName`: `0.24#17.7-r2`
+  - `versionCode`: `3013`
+- Auto-open now targets Android Auto `17.x`. Android Auto 17 removed
+  `com.google.android.projection.gearhead.service.CarSystemUiControllerService`, so AADisplay asks the
+  app decorator (`com.google.android.gearhead.appdecor.CarUiEntry.startCarActivity(Intent)`) to show its
+  car activity. The legacy static entry point is kept as a fallback for older Android Auto builds.
+- Every `CarUiEntry` instance (one per car region) is captured and the start request is retried
+  (5 attempts, ~1.6 s apart). Android Auto brings up its own home and app list first and drops activity
+  starts that arrive before its car activity manager is ready, which previously left the user on the
+  Android Auto app list for ~10 s.
+- The launcher and its PiP tasks are re-homed onto the AADisplay virtual display on connect/reconnect and
+  whenever Android moves them to the phone display.
+- AADisplay teardown is deferred by `DelayDestroyTime` so a short Android Auto reconnect reuses the same
+  virtual display instead of letting Android relocate the launcher to the phone display.
+
+### Fixed
+- AADisplay no longer stays closed on Android Auto `17.7` (auto-open was silently disabled because its
+  internal start-app service no longer exists).
+- Auto-open no longer blocks the Android Auto main thread: the start request moved from the car UI entry
+  constructor to the moment Android Auto has built its layout, which removes the "AADisplay is not
+  responding" dialog.
+
+### Added
+- Full screen mode for the launcher that drives the projection: the `hide-aadisplay-facet-bar` work.
+  While `Settings.Global leco_fullscreen` is `1` (published by the LecoAuto navbar module) AADisplay
+  reports the rail layout with `hasVerticalRail = false` and hides the facet bar, and the projected app
+  area (`id/activity`) is resized to the whole display. Android Auto hands the projected app exactly the
+  bounds of that view, so the app - and therefore the AADisplay virtual display - then gets the full
+  screen size (e.g. 1024x600) instead of the display minus the 80 px rail (944x600).
+  Keep `sys_ui_layout_canonical_vertical_rail_*` in use: it is the only layout Android Auto builds the
+  app decor (`CarUiEntry`) for, which auto-open depends on.
+- `FullscreenNoRail` and `FullscreenLayout` configuration keys. `FullscreenLayout` replaces the full
+  screen layout resource by name, which is useful for experiments.
+- The app area change is applied again when the full screen state changes while Android Auto is already
+  connected, and the projected app is reopened so Android Auto re-creates its display at the new size.
+
+### Verification
+- Built successfully:
+  - `:aa-display:assembleRelease`
+- Verified in the Desktop Head Unit against a rooted Samsung SM-G970F (Android Auto 17.8):
+  - full screen state published by the launcher module -> facet bar hidden, `id/activity` widened, and
+    the AADisplay virtual display reported `800x480` instead of `720x480` on an 800x480 head unit,
+  - full screen state absent -> the rail layout is left untouched and the virtual display stays `720x480`.
+
 ## 0.23.6 (2026-07-26)
 
 ### Changed
