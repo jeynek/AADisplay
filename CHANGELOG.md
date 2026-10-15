@@ -41,6 +41,17 @@
     navigation bar).
   The keyguard of the phone itself is untouched. `com.android.systemui` must be added to the module's
   scope (`vector-cli scope add` or the LSPosed scope list) and SystemUI restarted.
+- Touches from the head unit keep working while the phone screen is off. The power notifier marks
+  every display as "not interactive" when the phone screen turns off
+  (`PowerManagerService.Notifier` -> `InputManagerInternal.setDisplayInteractivities`), which makes
+  the input dispatcher drop every injected touch (`dumpsys input`: `Display not interactive:
+  {0,4,5,...}`). `ProjectionVirtualDisplayHook` tracks the display ids of the projection
+  (`DisplayManagerService.createVirtualDisplayInternal`) and keeps those entries interactive.
+- The left edge of the projected app is usable in full screen mode. Android Auto's rail sits above the
+  app area, so taps on the left edge landed on Android Auto's own (invisible) facet bar and opened
+  e.g. its notification facet. `stretchAppArea` now sets the rail to `INVISIBLE` while the app area is
+  widened: it keeps its measured size - Android Auto sizes its own rail display with it - but stops
+  taking touches, so the taps reach the projected app.
 
 ### Added
 - Full screen mode for the launcher that drives the projection: the `hide-aadisplay-facet-bar` work.
@@ -77,7 +88,11 @@
     `KeyguardDisplayManager` no longer logs `Keyguard enabled on display` (it logged that for 15
     displays before), `DisplayInfo` of those displays reports `FLAG_ALWAYS_UNLOCKED`, and the Desktop
     Head Unit screenshots taken before and after the power press are identical - all three apps are
-    still rendered in the launcher's slots.
+    still rendered in the launcher's slots,
+  - a click on the left edge of the car screen before the change opened Android Auto's
+    "no notifications" facet, after the change the same click reaches the launcher,
+  - `dumpsys input` reports the projection displays as interactive while the phone screen is off, and
+    the touches of the Desktop Head Unit keep reaching the launcher in that state.
 
 ## 0.23.6 (2026-07-26)
 

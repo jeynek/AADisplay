@@ -436,10 +436,16 @@ object AaUiHook: AaHook() {
                 mRailBackground = WeakReference(rail.background)
             }
             rail?.setBackgroundColor(Color.TRANSPARENT)
+            // The rail is above the projected app, so it also has to stop taking touches: otherwise
+            // a tap on the left edge of the app lands on Android Auto's (invisible) facet bar and
+            // opens e.g. its notification facet. INVISIBLE keeps the view measured, which Android
+            // Auto needs for its own rail display.
+            rail?.visibility = View.INVISIBLE
         } else {
             val original = mActivityOriginalSize ?: return
             params.width = original[0]
             params.height = original[1]
+            rail?.visibility = View.VISIBLE
             mRailBackground?.get()?.let { rail?.background = it }
         }
         activity.layoutParams = params
