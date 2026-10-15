@@ -59,8 +59,10 @@ object AaUiHook: AaHook() {
      */
     private val carUiEntryInstances = CopyOnWriteArrayList<Any>()
     private const val MAX_CAR_UI_ENTRIES = 4
-    private const val AUTO_OPEN_ATTEMPTS = 5
+    private const val AUTO_OPEN_ATTEMPTS = 2
     private const val AUTO_OPEN_RETRY_DELAY_MS = 1600L
+    /** Action handled by SelfStartReceiver in AADisplay's own process. */
+    private const val SELF_START_ACTION = "aa.display.action.SELF_START"
     /** Android Auto drops early requests, so also retry once its car UI has been up for a while. */
     private const val AUTO_OPEN_LATE_DELAY_MS = 12_000L
 
@@ -242,10 +244,31 @@ object AaUiHook: AaHook() {
         runMain {
             try {
                 delay(700)
+                requestSelfStart()
                 requestShowAaDisplay()
             } finally {
                 autoOpenRunning.set(false)
             }
+        }
+    }
+
+    /**
+     * Asks AADisplay to open itself through the car API: Android Auto 17.8 only accepts navigation
+     * and dial intents on the app decorator path, while this is the same call AADisplay uses to
+     * bring itself back to the front. The request is a broadcast because a package that is not
+     * running cannot be started with a background service start.
+     */
+    private fun requestSelfStart() {
+        try {
+            val intent = Intent(SELF_START_ACTION)
+                .setPackage(BuildConfig.APPLICATION_ID)
+                // AADisplay's process is usually not running yet, and a package in the stopped state
+                // only receives broadcasts when this flag is set.
+                .addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+            InitFields.appContext.sendBroadcast(intent)
+            log(tagName, "auto-open: asked AADisplay to start itself")
+        } catch (t: Throwable) {
+            log(tagName, "auto-open: self start request failed", t)
         }
     }
 

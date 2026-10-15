@@ -39,6 +39,15 @@
   screen layout resource by name, which is useful for experiments.
 - The app area change is applied again when the full screen state changes while Android Auto is already
   connected, and the projected app is reopened so Android Auto re-creates its display at the new size.
+- AADisplay opens itself when Android Auto connects, without the user having to pick it in the Android
+  Auto app list. Android Auto 17.8 rejects the app decorator request (`CarUiEntry.startCarActivity`)
+  unless the intent is a navigation or dial intent, so `SelfStartReceiver` opens AADisplay through the
+  car API instead (`CarFirstPartyManager.startCarActivity`), which is the same call AADisplay uses to
+  bring itself back to the front. The request is a broadcast with `FLAG_INCLUDE_STOPPED_PACKAGES`
+  because AADisplay's process is usually not running yet and a background service start is not allowed.
+- `Screen off replaces lock screen` switch in the settings screen for the existing
+  `ScreenOffReplaceLockScreen` option: the power button only turns the phone screen off, without locking
+  it, and the projection keeps running. It takes effect on the next Android Auto connection.
 
 ### Verification
 - Built successfully:

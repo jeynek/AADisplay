@@ -72,6 +72,15 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </service>
+        <receiver
+            android:name=".service.SelfStartReceiver"
+            android:enabled="true"
+            android:exported="true"
+            tools:ignore="ExportedReceiver" >
+            <intent-filter>
+                <action android:name="aa.display.action.SELF_START" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>
