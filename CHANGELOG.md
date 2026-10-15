@@ -48,10 +48,15 @@
   {0,4,5,...}`). `ProjectionVirtualDisplayHook` tracks the display ids of the projection
   (`DisplayManagerService.createVirtualDisplayInternal`) and keeps those entries interactive.
 - The left edge of the projected app is usable in full screen mode. Android Auto's rail sits above the
-  app area, so taps on the left edge landed on Android Auto's own (invisible) facet bar and opened
-  e.g. its notification facet. `stretchAppArea` now sets the rail to `INVISIBLE` while the app area is
-  widened: it keeps its measured size - Android Auto sizes its own rail display with it - but stops
-  taking touches, so the taps reach the projected app.
+  app area, so taps on the left edge landed on Android Auto's own (still visible) facet bar and opened
+  e.g. its notification facet. The rail is not part of the car UI view tree: Android Auto draws it -
+  the status icons and the facet buttons - into its own `GhFacetBar` window, a `PRIVATE_PRESENTATION`
+  window on a display of its own (`dumpsys display`: `virtual:...gearhead,10297,GhFacetBar,...`, 80x480).
+  `AaUiHook` now finds that window (`WindowManagerGlobal.mViews`, matched by `WindowManager.LayoutParams
+  .title`), sets it to `alpha = 0` with `FLAG_NOT_TOUCHABLE | FLAG_NOT_FOCUSABLE` and falls back to
+  `View.GONE` if the layout update fails, and the rail view of the car UI is also set to `INVISIBLE`.
+  Android Auto adds the window shortly after the car UI is inflated, so the lookup is retried
+  (40 attempts, 500 ms apart) instead of leaving the rail visible.
 
 ### Added
 - Full screen mode for the launcher that drives the projection: the `hide-aadisplay-facet-bar` work.
@@ -91,6 +96,11 @@
     still rendered in the launcher's slots,
   - a click on the left edge of the car screen before the change opened Android Auto's
     "no notifications" facet, after the change the same click reaches the launcher,
+  - the Android Auto rail is gone from the car screen in full screen: the `GhFacetBar` display of the
+    phone (`dumpsys SurfaceFlinger --display-id`, `screencap -d <id>`) is blank after the change
+    although it still renders the status icons and the facet glyphs before it, and the same content
+    that used to sit in the left strip of the projected car screen is gone,
+  - leaving full screen restores the rail (`facet bar window shown`, `app area restored with the rail`),
   - `dumpsys input` reports the projection displays as interactive while the phone screen is off, and
     the touches of the Desktop Head Unit keep reaching the launcher in that state.
 

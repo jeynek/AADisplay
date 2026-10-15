@@ -1,18 +1,23 @@
 package io.github.nitsuya.aa.display.xposed.hook.aa
 
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Color
+import android.os.Handler
+import android.os.Looper
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.ImageView
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.constraintlayout.widget.ConstraintSet
 import com.github.kyuubiran.ezxhelper.init.InitFields
 import com.github.kyuubiran.ezxhelper.utils.argTypes
+import com.github.kyuubiran.ezxhelper.utils.findAllMethods
 import com.github.kyuubiran.ezxhelper.utils.findMethod
 import com.github.kyuubiran.ezxhelper.utils.getIdByName
 import com.github.kyuubiran.ezxhelper.utils.getObjectOrNull
@@ -69,19 +74,39 @@ object AaUiHook: AaHook() {
     /** ViewGroup.LayoutParams.MATCH_PARENT, used to make the app area cover the whole display. */
     private const val FILL = -1
 
+    /** Window title Android Auto gives its rail window. */
+    private const val FACET_BAR_WINDOW_TITLE = "GhFacetBar"
+
+    /** How often the rail window lookup is retried before giving up, and with which delay. */
+    private const val FACET_BAR_LOOKUP_ATTEMPTS = 40
+    private const val FACET_BAR_LOOKUP_DELAY_MS = 500L
+
+    private const val VIEW_ROOT_IMPL = "android.view.ViewRootImpl"
+    private const val VIEW_MANAGER_GLOBAL = "android.view.WindowManagerGlobal"
+
     /** Original width/height of id/activity, kept so the full screen state can be reverted. */
     private var mActivityOriginalSize: IntArray? = null
 
     /** Original background of id/rail, restored when the rail comes back. */
     private var mRailBackground = WeakReference<android.graphics.drawable.Drawable>(null)
 
+    /** Android Auto's rail window, captured when it is added. */
+    private var mFacetBarWindow = WeakReference<View>(null)
+    private var mFacetBarParams: WindowManager.LayoutParams? = null
+    private var mFacetBarLookups = 0
+
+    private val mMainHandler by lazy { Handler(Looper.getMainLooper()) }
+
     /** App area mode the projected app was last opened with, null until the car UI is inflated. */
     private var mAppAreaFull: Boolean? = null
 
     private var mConfig: SharedPreferences? = null
-
-    /** Last facet bar this hook built, kept so the full screen state can be re-applied to it. */
-    private var mFacetBar = WeakReference<View>(null)
+    /**
+     * Every facet bar this hook built. Android Auto inflates its rail layout more than once (one
+     * instance per rail surface), so all of them have to follow the full screen state: hiding only
+     * the last one leaves the earlier bars visible as white icons on a transparent background.
+     */
+    private val mFacetBars = CopyOnWriteArrayList<WeakReference<View>>()
 
     private var resLayoutLeftResourceId: Int = 0
     private var resLayoutRightResourceId: Int = 0
@@ -208,6 +233,7 @@ object AaUiHook: AaHook() {
         if (canHookFacetBar) {
             hookFacetBar(config)
         }
+        hookFacetBarWindow()
         hookRadius(config)
     }
 
@@ -430,16 +456,13 @@ object AaUiHook: AaHook() {
             }
             params.width = FILL
             params.height = FILL
-            // The rail stays in the layout so Android Auto keeps sizing its own rail display, but it
-            // must not paint over the projected app that now covers the whole display.
+            // Android Auto's rail is drawn by its own GhFacetBar window, which is hidden by
+            // hookFacetBarWindow(). The rail view in this window is what is left of it: it must not
+            // paint (its background) nor take the touches of the left edge.
             if (rail != null && mRailBackground == null) {
                 mRailBackground = WeakReference(rail.background)
             }
             rail?.setBackgroundColor(Color.TRANSPARENT)
-            // The rail is above the projected app, so it also has to stop taking touches: otherwise
-            // a tap on the left edge of the app lands on Android Auto's (invisible) facet bar and
-            // opens e.g. its notification facet. INVISIBLE keeps the view measured, which Android
-            // Auto needs for its own rail display.
             rail?.visibility = View.INVISIBLE
         } else {
             val original = mActivityOriginalSize ?: return
@@ -450,7 +473,98 @@ object AaUiHook: AaHook() {
         }
         activity.layoutParams = params
         activity.requestLayout()
+        applyFacetBarWindowState()
         log(tagName, "app area ${if (full) "widened to the whole display" else "restored with the rail"}")
+    }
+
+    /**
+     * Android Auto draws its rail - the status icons and the facet buttons - into its own
+     * `GhFacetBar` window (`PRIVATE_PRESENTATION` on a display of its own), so no change to the car
+     * UI view tree can hide it. The window is looked up lazily and made invisible and non-touchable
+     * while the app area is widened.
+     */
+    private fun hookFacetBarWindow() {
+        findAllMethods(loadClass(VIEW_ROOT_IMPL)) {
+            name == "setView"
+            && parameterCount == 3
+            && parameterTypes[1] == WindowManager.LayoutParams::class.java
+        }.hookAfter { param ->
+            val windowParams = param.args[1] as? WindowManager.LayoutParams ?: return@hookAfter
+            if (windowParams.title?.toString() != FACET_BAR_WINDOW_TITLE) return@hookAfter
+            captureFacetBarWindow(param.args[0] as? View ?: return@hookAfter, windowParams)
+        }
+    }
+
+    private fun captureFacetBarWindow(view: View, windowParams: WindowManager.LayoutParams) {
+        log(tagName, "facet bar window captured")
+        mFacetBarWindow = WeakReference(view)
+        mFacetBarParams = windowParams
+    }
+
+    /** Finds Android Auto's rail window in the window manager, it is added before the hooks run. */
+    private fun findFacetBarRoot(): Boolean {
+        return runCatching {
+            val windowManagerGlobal = loadClass(VIEW_MANAGER_GLOBAL)
+            val instance = windowManagerGlobal.getMethod("getInstance").invoke(null)
+            // mViews holds the decor view of every window of this process.
+            val windows = windowManagerGlobal.getDeclaredField("mViews")
+                .apply { isAccessible = true }.get(instance) as? List<*> ?: return false
+            for (candidate in windows) {
+                val view = candidate as? View ?: continue
+                val windowParams = view.layoutParams as? WindowManager.LayoutParams ?: continue
+                if (windowParams.title?.toString() != FACET_BAR_WINDOW_TITLE) continue
+                captureFacetBarWindow(view, windowParams)
+                return true
+            }
+            return false
+        }.onFailure {
+            log(tagName, "facet bar window lookup failed", it)
+        }.getOrDefault(false)
+    }
+
+    /**
+     * Android Auto adds its rail window some time after the car UI is inflated, so a failed lookup
+     * is retried instead of leaving the rail visible.
+     */
+    private fun retryFacetBarWindowState() {
+        if (mFacetBarLookups++ >= FACET_BAR_LOOKUP_ATTEMPTS) return
+        mMainHandler.postDelayed({ applyFacetBarWindowState() }, FACET_BAR_LOOKUP_DELAY_MS)
+    }
+
+    private fun applyFacetBarWindowState() {
+        // The window is recreated when Android Auto restarts the projection, so a detached view is
+        // stale and has to be looked up again.
+        if (mFacetBarWindow.get()?.isAttachedToWindow != true) {
+            mFacetBarWindow.clear()
+            if (!findFacetBarRoot()) {
+                retryFacetBarWindowState()
+                return
+            }
+        }
+        val view = mFacetBarWindow.get() ?: return
+        val windowParams = mFacetBarParams ?: return
+        mFacetBarLookups = 0
+        val hide = isNoRailPreferred(mConfig)
+        val ignoreTouch = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        val ignoreFocus = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        val wanted = if (hide) windowParams.flags or ignoreTouch or ignoreFocus
+        else windowParams.flags and (ignoreTouch or ignoreFocus).inv()
+        val wantedAlpha = if (hide) 0f else 1f
+        if (windowParams.flags == wanted && windowParams.alpha == wantedAlpha) return
+        windowParams.flags = wanted
+        windowParams.alpha = wantedAlpha
+        val updated = runCatching {
+            (InitFields.appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
+                .updateViewLayout(view, windowParams)
+        }.onFailure {
+            log(tagName, "facet bar window update failed", it)
+        }.isSuccess
+        if (!updated) {
+            // Hiding the root view makes the window manager drop the window, this also works when
+            // the layout could not be updated.
+            view.visibility = if (hide) View.GONE else View.VISIBLE
+        }
+        log(tagName, "facet bar window ${if (hide) "hidden" else "shown"}")
     }
 
     private fun hookLayout() {
@@ -638,7 +752,9 @@ object AaUiHook: AaHook() {
             set.applyTo(aaFacetBar)
             resultViewGroup.visibility = View.GONE
             aaFacetBar.addView(resultViewGroup)
-            mFacetBar = WeakReference(aaFacetBar)
+            mFacetBars.add(WeakReference(aaFacetBar))
+            mFacetBars.removeAll { it.get() == null }
+            log(tagName, "facet bar built, ${mFacetBars.size} instance(s) tracked")
             FullscreenState.start(ctx)
             applyFullscreenState()
             param.result = aaFacetBar
@@ -693,13 +809,15 @@ object AaUiHook: AaHook() {
      */
     private fun applyFullscreenState() {
         applyAppAreaState()
-        val bar = mFacetBar.get() ?: return
         val hide = isNoRailPreferred(mConfig)
-        bar.post {
-            val target = if (hide) View.GONE else View.VISIBLE
-            if (bar.visibility != target) {
-                bar.visibility = target
-                log(tagName, "facet bar -> ${if (hide) "GONE" else "VISIBLE"} (fullscreen=${FullscreenState.value()})")
+        mFacetBars.forEach { ref ->
+            val bar = ref.get() ?: return@forEach
+            bar.post {
+                val target = if (hide) View.GONE else View.VISIBLE
+                if (bar.visibility != target) {
+                    bar.visibility = target
+                    log(tagName, "facet bar -> ${if (hide) "GONE" else "VISIBLE"} (fullscreen=${FullscreenState.value()})")
+                }
             }
         }
     }
