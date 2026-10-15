@@ -20,10 +20,14 @@ object AndroidHook : BaseHook() {
     override fun init(lpparam: XC_LoadPackage.LoadPackageParam) {
         Initiator.init(lpparam.classLoader)
         log(tagName, "xposed init")
+        installProjectionDisplayPowerHook(lpparam)
         var serviceManagerHook: XC_MethodHook.Unhook? = null
         serviceManagerHook = findMethod("android.os.ServiceManager") {
             name == "addService"
         }.hookBefore { param ->
+            if (param.args[0] == "display") {
+                installProjectionDisplayPowerHook(lpparam)
+            }
             if (param.args[0] == "package") {
                 serviceManagerHook?.unhook()
                 val pms = param.args[1] as IPackageManager
@@ -78,6 +82,18 @@ object AndroidHook : BaseHook() {
             }
         }
 
+    }
+
+    private fun installProjectionDisplayPowerHook(lpparam: XC_LoadPackage.LoadPackageParam) {
+        if (ProjectionVirtualDisplayHook.isInit) return
+        runCatching {
+            ProjectionVirtualDisplayHook.init(lpparam)
+            ProjectionVirtualDisplayHook.isInit = true
+            log(tagName, "Inited hook: ${ProjectionVirtualDisplayHook.tagName}")
+        }.onFailure {
+            // the display service classes may not be loaded yet, ServiceManager.addService retries
+            log(tagName, "ProjectionVirtualDisplayHook not available yet", it)
+        }
     }
 
     object Power {

@@ -25,6 +25,22 @@
 - Auto-open no longer blocks the Android Auto main thread: the start request moved from the car UI entry
   constructor to the moment Android Auto has built its layout, which removes the "AADisplay is not
   responding" dialog.
+- The launcher keeps showing its apps when the phone screen goes off or the phone locks. Three things
+  happen when Android turns the phone screen off, and all of them look like "the apps disappeared":
+  - the display manager requests `STATE_OFF` for the virtual displays as well (they belong to the
+    phone's display group), which freezes the projection and paints the launcher's app slots black,
+    so `ProjectionVirtualDisplayHook` keeps AADisplay's own display and the launcher's slot displays on
+    (`VirtualDisplayAdapter$VirtualDisplayDevice.requestDisplayStateLocked`),
+  - the window manager hides the windows of the displays which are not "always unlocked" while the
+    keyguard is up, so the same hook reports those displays as always unlocked
+    (`DisplayDeviceInfo.FLAG_ALWAYS_UNLOCKED`, the flag AADisplay's own display is created with),
+  - Android puts its keyguard on every display that is not marked "always unlocked"
+    (`KeyguardDisplayManager`, Android 16: `isKeyguardShowable`), which then covers those displays
+    with a black window, so `SystemUiKeyguardHook` skips it (`isKeyguardShowable` and
+    `showPresentation` return `false`, `updateNavigationBarVisibility` is skipped when it would show a
+    navigation bar).
+  The keyguard of the phone itself is untouched. `com.android.systemui` must be added to the module's
+  scope (`vector-cli scope add` or the LSPosed scope list) and SystemUI restarted.
 
 ### Added
 - Full screen mode for the launcher that drives the projection: the `hide-aadisplay-facet-bar` work.
@@ -46,8 +62,8 @@
   bring itself back to the front. The request is a broadcast with `FLAG_INCLUDE_STOPPED_PACKAGES`
   because AADisplay's process is usually not running yet and a background service start is not allowed.
 - `Screen off replaces lock screen` switch in the settings screen for the existing
-  `ScreenOffReplaceLockScreen` option: the power button only turns the phone screen off, without locking
-  it, and the projection keeps running. It takes effect on the next Android Auto connection.
+  `ScreenOffReplaceLockScreen` option: the power button only turns the phone screen off, and the
+  projection keeps running. It takes effect on the next Android Auto connection.
 
 ### Verification
 - Built successfully:
@@ -55,7 +71,13 @@
 - Verified in the Desktop Head Unit against a rooted Samsung SM-G970F (Android Auto 17.8):
   - full screen state published by the launcher module -> facet bar hidden, `id/activity` widened, and
     the AADisplay virtual display reported `800x480` instead of `720x480` on an 800x480 head unit,
-  - full screen state absent -> the rail layout is left untouched and the virtual display stays `720x480`.
+  - full screen state absent -> the rail layout is left untouched and the virtual display stays `720x480`,
+  - phone screen off (`input keyevent 26`) while the launcher ran with Maps, Spotify and Torque in its
+    slots: `VirtualDisplayAdapter` no longer reports `from ON to OFF` for the projection displays,
+    `KeyguardDisplayManager` no longer logs `Keyguard enabled on display` (it logged that for 15
+    displays before), `DisplayInfo` of those displays reports `FLAG_ALWAYS_UNLOCKED`, and the Desktop
+    Head Unit screenshots taken before and after the power press are identical - all three apps are
+    still rendered in the launcher's slots.
 
 ## 0.23.6 (2026-07-26)
 

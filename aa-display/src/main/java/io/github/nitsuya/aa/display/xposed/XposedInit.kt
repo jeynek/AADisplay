@@ -10,6 +10,7 @@ import io.github.nitsuya.aa.display.xposed.hook.AndroidAuoHook
 import io.github.nitsuya.aa.display.xposed.hook.AndroidHook
 import io.github.nitsuya.aa.display.xposed.hook.BaseHook
 import io.github.nitsuya.aa.display.xposed.hook.OtherHook
+import io.github.nitsuya.aa.display.xposed.hook.SystemUiKeyguardHook
 import io.github.nitsuya.aa.display.xposed.hook.WazeHook
 
 class XposedInit : IXposedHookZygoteInit, IXposedHookLoadPackage{
@@ -25,6 +26,7 @@ class XposedInit : IXposedHookZygoteInit, IXposedHookLoadPackage{
         val packageName = lpparam.packageName
         when{
             packageName == "android" && lpparam.appInfo == null -> arrayOf(AndroidHook)
+            packageName == "com.android.systemui" -> arrayOf(SystemUiKeyguardHook)
             packageName == "com.google.android.projection.gearhead" -> arrayOf(AndroidAuoHook)
             packageName == "com.waze" -> arrayOf(OtherHook, WazeHook)
             packageName == BuildConfig.APPLICATION_ID || lpparam.appInfo == null || lpparam.appInfo.uid == 1000 -> null
