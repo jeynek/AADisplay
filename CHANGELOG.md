@@ -76,8 +76,12 @@
   Android Auto recreates the rail together with the projection, which happens on every Android Auto
   restart and also when the launcher is restarted, and the recreated bar is visible and touchable
   again: without the watchdog the rail came back and stole the touches of the left edge until the
-  full screen state changed. The state is cheap to check - the flags of a window layout that is
-  already correct are left alone - and the lookup is skipped entirely while there is nothing to hide.
+  full screen state changed.
+- The rail also comes back when Android Auto rewrites the layout of its own window instead of creating
+  it again, which was observed when the car switched between day and night mode and when a notification
+  made it re-apply its car UI. The watchdog compares the window's current layout and its view with what
+  it wants instead of trusting the copy it wrote itself, applies the change again up to three times
+  (100 ms apart) when Android Auto rejected it, and hides the rail view when it keeps overwriting it.
 
 ### Added
 - Full screen mode for the launcher that drives the projection: the `hide-aadisplay-facet-bar` work.
