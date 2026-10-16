@@ -18,6 +18,22 @@
   whenever Android moves them to the phone display.
 - AADisplay teardown is deferred by `DelayDestroyTime` so a short Android Auto reconnect reuses the same
   virtual display instead of letting Android relocate the launcher to the phone display.
+- The left rail now disappears in every full screen state and the projected app fills the whole screen.
+  The `HideAaRail` option (on by default) drives the no-rail layout request
+  (`hasVerticalRail = false`), the app area widening and the `GhFacetBar` window hiding, instead of only
+  acting while `leco_fullscreen` is `1`. Without the layout change Android Auto keeps reserving the rail
+  width: the projected app area - and with it the AADisplay virtual display - stayed at
+  `display width - 80 px` (720x480 on an 800x480 head unit) with a black strip on the left, no matter how
+  the rail window was hidden afterwards. Reserving the rail also keeps Android Auto's own rail container
+  in the car UI, so the same option is what stops the rail from coming back and stealing the left edge
+  touches when full screen turns off.
+- The app area is no longer "restored with the rail" when full screen turns off, so that transition no
+  longer reopens the projected app (and no longer flickers the car screen).
+- `VirtualDisplayDpi` is applied to the projection display itself, on connect and when the car display is
+  resized. `0` (or any value <= 50) keeps the density Android Auto reports.
+- The screen density and the LecoAuto minimum width can be typed in the settings screen, not only picked
+  from the predefined list. `LecoAuto Min Width` clamps to `200..1000`, which is the range LecoAuto
+  accepts, and `0` keeps the value from the theme.
 
 ### Fixed
 - AADisplay no longer stays closed on Android Auto `17.7` (auto-open was silently disabled because its
@@ -85,6 +101,17 @@
 - `Screen off replaces lock screen` switch in the settings screen for the existing
   `ScreenOffReplaceLockScreen` option: the power button only turns the phone screen off, and the
   projection keeps running. It takes effect on the next Android Auto connection.
+- `Rail hidden` switch (`HideAaRail`, on by default): hides Android Auto's left rail and gives its width
+  to the projected app in every full screen state.
+- `LecoAuto Min Width` (`LecoMinWidth`) plus `LecoAutoHook`, which runs in the launcher's own process and
+  overrides the `minimum_width` of its car desktop theme where LecoAuto reads it
+  (`JSONObject.getInt("minimum_width")`, clamped to the `200..1000` LecoAuto accepts). LecoAuto re-reads
+  its theme when it builds the desktop, so the override applies the next time the desktop is created -
+  add `com.lecoauto` to the module scope (`vector-cli scope add io.github.nitsuya.aa.display
+  com.lecoauto/0`).
+- `ConfigReceiver` (`aa.display.action.SET_CONFIG` broadcast with `key`/`value`/`type`) to set a
+  configuration value from the outside, which is how the settings were driven while the settings
+  activity could not be automated (it is a floating window whose position changes).
 
 ### Verification
 - Built successfully:
@@ -112,7 +139,14 @@
     `facet bar window hidden`) although `leco_fullscreen` was never touched, and `dumpsys window` reports
     the new window with `alpha=0.0` and `fl=... NOT_TOUCHABLE NOT_FOCUSABLE`,
   - `dumpsys input` reports the projection displays as interactive while the phone screen is off, and
-    the touches of the Desktop Head Unit keep reaching the launcher in that state.
+    the touches of the Desktop Head Unit keep reaching the launcher in that state,
+  - with the rail hidden and `leco_fullscreen` **0**, the AADisplay virtual display is created at the
+    full `800x480` of the head unit (it was `720x480` with an empty strip on the left before), the
+    launcher's desktop fills the whole car screen, and `dumpsys window` reports the `GhFacetBar` window
+    with `alpha=0.0` and `fl=... NOT_TOUCHABLE NOT_FOCUSABLE`,
+  - AADisplay opened itself again after a clean `Desktop Head Unit` disconnect/reconnect without the user
+    touching the app list, and the launcher's task was moved onto the projection display
+    (`onActivityRestartAttempt: rehome com.lecoauto (task=...) -> display <id>`).
 
 ## 0.23.6 (2026-07-26)
 

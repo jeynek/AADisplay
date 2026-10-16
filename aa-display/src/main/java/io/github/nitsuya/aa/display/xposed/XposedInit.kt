@@ -9,6 +9,7 @@ import io.github.nitsuya.aa.display.BuildConfig
 import io.github.nitsuya.aa.display.xposed.hook.AndroidAuoHook
 import io.github.nitsuya.aa.display.xposed.hook.AndroidHook
 import io.github.nitsuya.aa.display.xposed.hook.BaseHook
+import io.github.nitsuya.aa.display.xposed.hook.LecoAutoHook
 import io.github.nitsuya.aa.display.xposed.hook.OtherHook
 import io.github.nitsuya.aa.display.xposed.hook.SystemUiKeyguardHook
 import io.github.nitsuya.aa.display.xposed.hook.WazeHook
@@ -29,6 +30,8 @@ class XposedInit : IXposedHookZygoteInit, IXposedHookLoadPackage{
             packageName == "com.android.systemui" -> arrayOf(SystemUiKeyguardHook)
             packageName == "com.google.android.projection.gearhead" -> arrayOf(AndroidAuoHook)
             packageName == "com.waze" -> arrayOf(OtherHook, WazeHook)
+            // The launcher runs as the system uid, so it has to be matched before the system check.
+            packageName == LecoAutoHook.LAUNCHER_PACKAGE -> arrayOf(LecoAutoHook)
             packageName == BuildConfig.APPLICATION_ID || lpparam.appInfo == null || lpparam.appInfo.uid == 1000 -> null
             else -> arrayOf(OtherHook)
         }?.also {

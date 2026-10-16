@@ -81,6 +81,15 @@
                 <action android:name="aa.display.action.SELF_START" />
             </intent-filter>
         </receiver>
+        <receiver
+            android:name=".service.ConfigReceiver"
+            android:enabled="true"
+            android:exported="true"
+            tools:ignore="ExportedReceiver" >
+            <intent-filter>
+                <action android:name="aa.display.action.SET_CONFIG" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

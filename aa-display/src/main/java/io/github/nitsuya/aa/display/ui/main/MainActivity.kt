@@ -61,6 +61,16 @@ class MainActivity :
         val label: String
     )
 
+    private data class DensityOption(
+        val dpi: Int,
+        val label: String
+    )
+
+    private data class MinWidthOption(
+        val width: Int,
+        val label: String
+    )
+
     private val appConfig by lazy {
         SharedPreferencesAccess.openForHooks(this, AADisplayConfig.ConfigName)
     }
@@ -69,13 +79,20 @@ class MainActivity :
     private var launcherDisplayToPackage: Map<String, String> = emptyMap()
     private var delayOptions: List<DelayOption> = emptyList()
     private var delayDisplayToSeconds: Map<String, Int> = emptyMap()
+    private var densityOptions: List<DensityOption> = emptyList()
+    private var densityDisplayToDpi: Map<String, Int> = emptyMap()
+    private var minWidthOptions: List<MinWidthOption> = emptyList()
+    private var minWidthDisplayToWidth: Map<String, Int> = emptyMap()
     private var defaultHomePackage: String? = null
     private var savedLauncherPackage: String? = null
     private var savedDelayDestroyTime: Int = 180
+    private var savedDisplayDensity: Int = 0
+    private var savedLecoMinWidth: Int = 0
     private var savedAutoOpen: Boolean = false
     private var savedDisableWazeOnAa: Boolean = false
     private var savedDisableGoogleMapsOnAa: Boolean = false
     private var savedScreenOffReplaceLockScreen: Boolean = false
+    private var savedHideAaRail: Boolean = true
     override fun onCreate(savedInstanceState: Bundle?) {
         ActivityMainBinding.inflate(LayoutInflater.from(this))
         super.onCreate(savedInstanceState)
@@ -180,6 +197,10 @@ class MainActivity :
             updateSaveButtonState()
         }
 
+        baseBinding.switchHideAaRail.setOnCheckedChangeListener { _, _ ->
+            updateSaveButtonState()
+        }
+
         baseBinding.actvLauncherPackage.apply {
             inputType = InputType.TYPE_NULL
             keyListener = null
@@ -230,6 +251,21 @@ class MainActivity :
             }
         }
 
+        // Both fields accept a typed value as well, the drop down only offers the common ones.
+        baseBinding.actvDisplayDensity.apply {
+            setOnItemClickListener { _, _, _, _ ->
+                validateDensitySelection(showError = false)
+                updateSaveButtonState()
+            }
+        }
+
+        baseBinding.actvLecoMinWidth.apply {
+            setOnItemClickListener { _, _, _, _ ->
+                validateMinWidthSelection(showError = false)
+                updateSaveButtonState()
+            }
+        }
+
         baseBinding.btnSave.setOnClickListener {
             persistSettings()
         }
@@ -240,16 +276,22 @@ class MainActivity :
         savedDisableWazeOnAa = AADisplayConfig.DisableWazeOnAa.get(appConfig)
         savedDisableGoogleMapsOnAa = AADisplayConfig.DisableGoogleMapsOnAa.get(appConfig)
         savedScreenOffReplaceLockScreen = AADisplayConfig.ScreenOffReplaceLockScreen.get(appConfig)
+        savedHideAaRail = AADisplayConfig.HideAaRail.get(appConfig)
         savedLauncherPackage = AADisplayConfig.LauncherPackage.get(appConfig)?.trim().orEmpty()
         savedDelayDestroyTime = AADisplayConfig.DelayDestroyTime.get(appConfig)
+        savedDisplayDensity = AADisplayConfig.VirtualDisplayDpi.get(appConfig)
+        savedLecoMinWidth = AADisplayConfig.LecoMinWidth.get(appConfig)
         baseBinding.switchAutoOpen.isChecked = savedAutoOpen
         baseBinding.switchDisableWazeOnAa.isChecked = savedDisableWazeOnAa
         baseBinding.switchDisableGoogleMapsOnAa.isChecked = savedDisableGoogleMapsOnAa
         baseBinding.switchScreenOffReplaceLockScreen.isChecked = savedScreenOffReplaceLockScreen
+        baseBinding.switchHideAaRail.isChecked = savedHideAaRail
 
         detectLauncherEnvironment()
         bindLauncherDropdown()
         bindDelayDropdown()
+        bindDensityDropdown()
+        bindMinWidthDropdown()
 
         val configuredLauncher = savedLauncherPackage.orEmpty()
         val selected = launcherOptions.firstOrNull { it.packageName == configuredLauncher }
@@ -269,8 +311,24 @@ class MainActivity :
             baseBinding.actvDelayDestroyTime.setText("", false)
         }
 
+        val selectedDensity = densityOptions.firstOrNull { it.dpi == savedDisplayDensity }
+        if (selectedDensity != null) {
+            baseBinding.actvDisplayDensity.setText(selectedDensity.label, false)
+        } else {
+            baseBinding.actvDisplayDensity.setText(if (savedDisplayDensity == 0) "" else "$savedDisplayDensity dpi", false)
+        }
+
+        val selectedMinWidth = minWidthOptions.firstOrNull { it.width == savedLecoMinWidth }
+        if (selectedMinWidth != null) {
+            baseBinding.actvLecoMinWidth.setText(selectedMinWidth.label, false)
+        } else {
+            baseBinding.actvLecoMinWidth.setText(if (savedLecoMinWidth == 0) "" else "$savedLecoMinWidth", false)
+        }
+
         validateLauncherSelection()
         validateDelaySelection(showError = false)
+        validateDensitySelection(showError = false)
+        validateMinWidthSelection(showError = false)
         updateSaveButtonState()
     }
 
@@ -319,6 +377,42 @@ class MainActivity :
             delayOptions.map { it.label }
         )
         baseBinding.actvDelayDestroyTime.setAdapter(adapter)
+    }
+
+    private fun bindDensityDropdown() {
+        densityOptions = listOf(
+            DensityOption(0, getString(R.string.display_density_from_aa)),
+            DensityOption(160, "160 dpi"),
+            DensityOption(200, "200 dpi"),
+            DensityOption(213, "213 dpi"),
+            DensityOption(240, "240 dpi"),
+            DensityOption(280, "280 dpi"),
+            DensityOption(320, "320 dpi")
+        )
+        densityDisplayToDpi = densityOptions.associate { it.label to it.dpi }
+        val adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_list_item_1,
+            densityOptions.map { it.label }
+        )
+        baseBinding.actvDisplayDensity.setAdapter(adapter)
+    }
+
+    private fun bindMinWidthDropdown() {
+        minWidthOptions = listOf(0, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 900, 1000)
+            .map { width ->
+                MinWidthOption(
+                    width,
+                    if (width == 0) getString(R.string.leco_min_width_from_theme) else width.toString()
+                )
+            }
+        minWidthDisplayToWidth = minWidthOptions.associate { it.label to it.width }
+        val adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_list_item_1,
+            minWidthOptions.map { it.label }
+        )
+        baseBinding.actvLecoMinWidth.setAdapter(adapter)
     }
 
     private fun showAllLauncherOptions() {
@@ -445,6 +539,28 @@ class MainActivity :
         return delayOptions.firstOrNull { it.label == raw }?.seconds
     }
 
+    private fun resolveSelectedDisplayDensity(): Int? {
+        val raw = baseBinding.actvDisplayDensity.text?.toString()?.trim().orEmpty()
+        if (raw.isBlank()) return null
+        densityDisplayToDpi[raw]?.let { return it }
+        parseTypedNumber(raw)?.let { return it }
+        return densityOptions.firstOrNull { it.label == raw }?.dpi
+    }
+
+    private fun resolveSelectedMinWidth(): Int? {
+        val raw = baseBinding.actvLecoMinWidth.text?.toString()?.trim().orEmpty()
+        if (raw.isBlank()) return null
+        minWidthDisplayToWidth[raw]?.let { return it }
+        parseTypedNumber(raw)?.let { return it }
+        return minWidthOptions.firstOrNull { it.label == raw }?.width
+    }
+
+    /** Reads a value the user typed, e.g. "221", "221 dpi" or "550 px". */
+    private fun parseTypedNumber(raw: String): Int? {
+        val digits = raw.takeWhile { it.isDigit() }
+        return digits.takeIf { it.isNotEmpty() }?.toIntOrNull()
+    }
+
     private fun validateLauncherSelection(): Boolean {
         val selectedPackage = resolveSelectedLauncherPackage()
 
@@ -494,10 +610,34 @@ class MainActivity :
         return valid
     }
 
+    private fun validateDensitySelection(showError: Boolean): Boolean {
+        val value = resolveSelectedDisplayDensity()
+        val valid = value != null && (value == 0 || value > 50)
+        if (!valid && showError) {
+            baseBinding.tilDisplayDensity.error = getString(R.string.display_density_invalid)
+        } else if (valid) {
+            baseBinding.tilDisplayDensity.error = null
+        }
+        return valid
+    }
+
+    private fun validateMinWidthSelection(showError: Boolean): Boolean {
+        val value = resolveSelectedMinWidth()
+        val valid = value != null && (value == 0 || value in 200..1000)
+        if (!valid && showError) {
+            baseBinding.tilLecoMinWidth.error = getString(R.string.leco_min_width_invalid)
+        } else if (valid) {
+            baseBinding.tilLecoMinWidth.error = null
+        }
+        return valid
+    }
+
     private fun persistSettings() {
         val launcherValid = validateLauncherSelection()
         val delayValid = validateDelaySelection(showError = true)
-        if (!launcherValid || !delayValid) {
+        val densityValid = validateDensitySelection(showError = true)
+        val minWidthValid = validateMinWidthSelection(showError = true)
+        if (!launcherValid || !delayValid || !densityValid || !minWidthValid) {
             updateSaveButtonState()
             return
         }
@@ -507,6 +647,7 @@ class MainActivity :
         val disableWazeOnAa = baseBinding.switchDisableWazeOnAa.isChecked
         val disableGoogleMapsOnAa = baseBinding.switchDisableGoogleMapsOnAa.isChecked
         val screenOffReplaceLockScreen = baseBinding.switchScreenOffReplaceLockScreen.isChecked
+        val hideAaRail = baseBinding.switchHideAaRail.isChecked
         if (disableWazeOnAa != savedDisableWazeOnAa) {
             val applied = WazeOnAaManager.apply(disableWazeOnAa)
             if (!applied) {
@@ -531,9 +672,12 @@ class MainActivity :
             .putBoolean(AADisplayConfig.DisableWazeOnAa.key, disableWazeOnAa)
             .putBoolean(AADisplayConfig.DisableGoogleMapsOnAa.key, disableGoogleMapsOnAa)
             .putBoolean(AADisplayConfig.ScreenOffReplaceLockScreen.key, screenOffReplaceLockScreen)
+            .putBoolean(AADisplayConfig.HideAaRail.key, hideAaRail)
             .putString(AADisplayConfig.LauncherPackage.key, launcherPackage)
             .putString(AADisplayConfig.HomePackage.key, launcherPackage)
             .putString(AADisplayConfig.DelayDestroyTime.key, delay.toString())
+            .putString(AADisplayConfig.VirtualDisplayDpi.key, (resolveSelectedDisplayDensity() ?: 0).toString())
+            .putString(AADisplayConfig.LecoMinWidth.key, (resolveSelectedMinWidth() ?: 0).toString())
             .commit()
 
         val readableForHooks = SharedPreferencesAccess.makeReadableForHooks(this, AADisplayConfig.ConfigName)
@@ -547,8 +691,11 @@ class MainActivity :
         savedDisableWazeOnAa = disableWazeOnAa
         savedDisableGoogleMapsOnAa = disableGoogleMapsOnAa
         savedScreenOffReplaceLockScreen = screenOffReplaceLockScreen
+        savedHideAaRail = hideAaRail
         savedLauncherPackage = launcherPackage
         savedDelayDestroyTime = delay
+        savedDisplayDensity = resolveSelectedDisplayDensity() ?: 0
+        savedLecoMinWidth = resolveSelectedMinWidth() ?: 0
         Toast.makeText(this, getString(R.string.settings_saved_successfully), Toast.LENGTH_SHORT).show()
         updateSaveButtonState()
     }
@@ -557,7 +704,9 @@ class MainActivity :
         val hasChanges = hasPendingChanges()
         val enabled = hasChanges &&
             validateLauncherSelection() &&
-            validateDelaySelection(showError = false)
+            validateDelaySelection(showError = false) &&
+            validateDensitySelection(showError = false) &&
+            validateMinWidthSelection(showError = false)
         baseBinding.btnSave.isEnabled = enabled
         baseBinding.btnSave.alpha = if (enabled) 1f else 0.6f
     }
@@ -567,14 +716,20 @@ class MainActivity :
         val currentDisableWazeOnAa = baseBinding.switchDisableWazeOnAa.isChecked
         val currentDisableGoogleMapsOnAa = baseBinding.switchDisableGoogleMapsOnAa.isChecked
         val currentScreenOffReplaceLockScreen = baseBinding.switchScreenOffReplaceLockScreen.isChecked
+        val currentHideAaRail = baseBinding.switchHideAaRail.isChecked
         val currentLauncher = resolveSelectedLauncherPackage()
         val currentDelay = resolveSelectedDelaySeconds()
+        val currentDisplayDensity = resolveSelectedDisplayDensity()
+        val currentMinWidth = resolveSelectedMinWidth()
         return currentAutoOpen != savedAutoOpen ||
             currentDisableWazeOnAa != savedDisableWazeOnAa ||
             currentDisableGoogleMapsOnAa != savedDisableGoogleMapsOnAa ||
             currentScreenOffReplaceLockScreen != savedScreenOffReplaceLockScreen ||
+            currentHideAaRail != savedHideAaRail ||
             currentLauncher != savedLauncherPackage ||
-            currentDelay != savedDelayDestroyTime
+            currentDelay != savedDelayDestroyTime ||
+            currentDisplayDensity != savedDisplayDensity ||
+            currentMinWidth != savedLecoMinWidth
     }
 
     private fun showValidationMessage(message: String, success: Boolean) {

@@ -216,6 +216,7 @@ object AaUiHook: AaHook() {
             tagName,
             "config: null=${config == null}, autoOpen=${AADisplayConfig.AutoOpen.get(config)}, " +
                 "noRail=${AADisplayConfig.FullscreenNoRail.get(config)}, " +
+                "hideRail=${AADisplayConfig.HideAaRail.get(config)}, " +
                 "layout=${AADisplayConfig.FullscreenLayout.get(config)}"
         )
         FullscreenState.onChange = { applyFullscreenState() }
@@ -233,6 +234,7 @@ object AaUiHook: AaHook() {
         }
         if (startCarActivityMethod != null) {
             hookCarUiEntryInstance()
+            hookStartCarActivityCalls()
         }
         if (canHookFacetBar) {
             hookFacetBar(config)
@@ -280,6 +282,25 @@ object AaUiHook: AaHook() {
             } finally {
                 autoOpenRunning.set(false)
             }
+        }
+    }
+
+    /**
+     * Android Auto's own app launcher opens apps through this same call, so log the intent it uses:
+     * the auto-open request has to look exactly like what Android Auto itself accepts.
+     */
+    private fun hookStartCarActivityCalls() {
+        try {
+            startCarActivityMethod?.hookBefore { param ->
+                val intent = param.args[0] as? Intent
+                log(
+                    tagName,
+                    "startCarActivity: $intent extras=${intent?.extras?.keySet()?.joinToString()} " +
+                        "flags=0x${intent?.flags?.toString(16)}"
+                )
+            }
+        } catch (t: Throwable) {
+            log(tagName, "startCarActivity logging hook failed", t)
         }
     }
 
@@ -551,13 +572,15 @@ object AaUiHook: AaHook() {
     }
 
     /**
-     * Keeps Android Auto's rail window invisible and non-touchable while the app area is widened. The
-     * window is recreated when Android Auto restarts the projection, so a detached view is stale and
-     * the window has to be looked up again.
+     * Keeps Android Auto's rail window invisible and non-touchable. The rail is never wanted - the
+     * launcher shows what the car screen has to show - and it is the window that eats the touches of
+     * the left edge, so it is hidden in every mode and not only in full screen. The window is
+     * recreated when Android Auto restarts the projection, so a detached view is stale and the window
+     * has to be looked up again.
      */
     private fun applyFacetBarWindowState() {
-        val hide = isNoRailPreferred(mConfig)
-        // Nothing to restore and nothing to hide: no reason to walk the window list every second.
+        val hide = AADisplayConfig.HideAaRail.get(mConfig)
+        // Nothing to restore: no reason to walk the window list every second.
         if (!hide && mFacetBarWindow.get() == null) return
         if (mFacetBarWindow.get()?.isAttachedToWindow != true) {
             mFacetBarWindow.clear()
@@ -825,9 +848,14 @@ object AaUiHook: AaHook() {
         }
     }
 
-    /** True while the Launcher is in full screen and the no-rail behaviour is enabled. */
+    /**
+     * True while the left rail has to disappear. The rail stays hidden in both full screen states, so
+     * Android Auto must leave it out of the car UI as well: otherwise it keeps reserving the rail
+     * width and the projected app is drawn next to an empty strip instead of filling the screen.
+     */
     private fun isNoRailPreferred(config: SharedPreferences?): Boolean =
-        FullscreenState.value() && AADisplayConfig.FullscreenNoRail.get(config)
+        AADisplayConfig.HideAaRail.get(config) ||
+            (FullscreenState.value() && AADisplayConfig.FullscreenNoRail.get(config))
 
     /**
      * Mirrors the launcher's full screen state onto the facet bar. The projected area itself is
@@ -843,7 +871,8 @@ object AaUiHook: AaHook() {
                 val target = if (hide) View.GONE else View.VISIBLE
                 if (bar.visibility != target) {
                     bar.visibility = target
-                    log(tagName, "facet bar -> ${if (hide) "GONE" else "VISIBLE"} (fullscreen=${FullscreenState.value()})")
+                    log(tagName, "facet bar -> ${if (hide) "GONE" else "VISIBLE"} " +
+                        "(hideRail=${AADisplayConfig.HideAaRail.get(mConfig)}, fullscreen=${FullscreenState.value()})")
                 }
             }
         }

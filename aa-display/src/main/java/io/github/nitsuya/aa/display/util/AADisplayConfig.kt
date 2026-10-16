@@ -22,6 +22,12 @@ sealed class AADisplayConfig<T>(val key: String) {
     object DelayDestroyTime: IntConfig("DelayDestroyTime", 180)
     object ScreenOffReplaceLockScreen: BooleanConfig("ScreenOffReplaceLockScreen", false)
     object CloseLauncherDashboard: BooleanConfig("CloseLauncherDashboard", true)
+    /**
+     * Android Auto's own rail - the status icons and its facet buttons - is of no use on a screen this
+     * app projects, and its window is the one that takes the touches of the left edge. Hidden by
+     * default, in every mode.
+     */
+    object HideAaRail: BooleanConfig("HideAaRail", true)
     /** While the LecoAuto desktop is in full screen: drop the vertical rail and hide the facet bar. */
     object FullscreenNoRail: BooleanConfig("FullscreenNoRail", true)
     /**
@@ -31,6 +37,11 @@ sealed class AADisplayConfig<T>(val key: String) {
     object FullscreenLayout: StringConfig("FullscreenLayout", null)
     object ForceRightAngle: BooleanConfig("ForceRightAngle", true)
     object DisplayImePolicy: IntConfig("DisplayImePolicy", 0) //WindowManager.DISPLAY_IME_POLICY_LOCAL:0, WindowManager.DISPLAY_IME_POLICY_FALLBACK_DISPLAY:1
+    /**
+     * Overrides the `minimum_width` of the LecoAuto theme. LecoAuto scales its desktop with that value
+     * and only accepts it between 200 and 1000; 0 keeps the value of the theme.
+     */
+    object LecoMinWidth: IntConfig("LecoMinWidth", 0)
     object VoiceAssistShell: StringConfig("VoiceAssistShell", null)
     object CreateVirtualDisplayBefore: ArrayStringConfig("CreateVirtualDisplayBefore")
     object DestroyVirtualDisplayAfter: ArrayStringConfig("DestroyVirtualDisplayAfter")

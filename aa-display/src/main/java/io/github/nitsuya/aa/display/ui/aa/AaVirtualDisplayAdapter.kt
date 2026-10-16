@@ -128,13 +128,14 @@ class AaVirtualDisplayAdapter(
         refreshLauncherPackage("connect")
         trackPackage(mLauncherPackage, 0)
         trackPackage(mHomePackage, 0)
+        val density = resolveDensityDpi(densityDpi)
         val indent = Binder.clearCallingIdentity()
         try {
             mVirtualDisplay = Instances.displayManager.createVirtualDisplay(
                 "AADisplay-${System.currentTimeMillis()}",
                 width,
                 height,
-                densityDpi,
+                density,
                 surface,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
                     or DisplayManager.VIRTUAL_DISPLAY_FLAG_SECURE
@@ -150,8 +151,8 @@ class AaVirtualDisplayAdapter(
             Binder.restoreCallingIdentity(indent)
         }
         mDisplayId = mVirtualDisplay.display.displayId
-        mDensityDpi = densityDpi
-        log(TAG, "virtual display created: id=$mDisplayId, ${width}x$height,$densityDpi, surface=${surface != null}, launcher=${mLauncherPackage.orEmpty()}")
+        mDensityDpi = density
+        log(TAG, "virtual display created: id=$mDisplayId, ${width}x$height,$density, surface=${surface != null}, launcher=${mLauncherPackage.orEmpty()}")
 
         try {
             Instances.iWindowManager.apply {
@@ -203,12 +204,29 @@ class AaVirtualDisplayAdapter(
     }
 
     fun onReconnected(width: Int, height: Int, densityDpi: Int){
-        mVirtualDisplay.resize(width, height, densityDpi)
-        mDensityDpi = densityDpi
+        val density = resolveDensityDpi(densityDpi)
+        mVirtualDisplay.resize(width, height, density)
+        mDensityDpi = density
         refreshLauncherPackage("reconnect")
         trackPackage(mLauncherPackage, 0)
         trackPackage(mHomePackage, 0)
         rehomeLauncherTasks("reconnect")
+    }
+
+    /**
+     * The car head unit decides the density of the projected screen and Android Auto passes it on, so
+     * an 800x480 screen is usually 160 dpi (1 dp = 1 px) and everything on it - the launcher's own UI
+     * and the apps it shows - comes out small. `VirtualDisplayDpi` overrides that value for the
+     * virtual display AADisplay creates; 0 (or any value <= 50) keeps the density from Android Auto.
+     */
+    private fun resolveDensityDpi(densityDpiFromAa: Int): Int {
+        config?.reload()
+        val configured = AADisplayConfig.VirtualDisplayDpi.get(config)
+        if (configured <= 50) return densityDpiFromAa
+        if (configured != densityDpiFromAa) {
+            log(TAG, "density override: $densityDpiFromAa -> $configured")
+        }
+        return configured
     }
 
     fun onDestroy() {

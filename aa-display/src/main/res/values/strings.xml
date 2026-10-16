@@ -32,6 +32,16 @@
     <string name="save_settings">Save</string>
     <string name="delay_destroy_time_title">Delay Destroy Time</string>
     <string name="delay_destroy_time_invalid">Select a valid Delay Destroy Time</string>
+    <string name="display_density_title">Screen Density (DPI)</string>
+    <string name="display_density_summary">Overrides the density the car reports. A higher value makes the icons and text on the screen bigger. \"From Android Auto\" keeps the density of the car.</string>
+    <string name="display_density_from_aa">From Android Auto</string>
+    <string name="display_density_invalid">Select a valid Screen Density</string>
+    <string name="leco_min_width_title">LecoAuto Min Width</string>
+    <string name="leco_min_width_summary">Overrides the minimum width of the LecoAuto theme, the launcher scales its desktop with it. \"From theme\" keeps the value of the theme.</string>
+    <string name="leco_min_width_from_theme">From theme</string>
+    <string name="leco_min_width_invalid">Select a valid Min Width</string>
+    <string name="hide_aa_rail_title">Hide Android Auto Rail</string>
+    <string name="hide_aa_rail_summary">Hides Android Auto\'s own left rail - the status icons and its facet buttons - in every mode and stops it from taking the touches of the left edge. Android Auto only draws the rail of a car screen it manages itself, this app does not need it.</string>
     <string name="delay_60_seconds">60 Seconds</string>
     <string name="delay_120_seconds">120 Seconds</string>
     <string name="delay_180_seconds">180 Seconds</string>
