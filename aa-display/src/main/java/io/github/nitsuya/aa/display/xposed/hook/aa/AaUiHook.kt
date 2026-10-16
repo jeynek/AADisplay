@@ -122,6 +122,7 @@ object AaUiHook: AaHook() {
 
     private var resLayoutLeftResourceId: Int = 0
     private var resLayoutRightResourceId: Int = 0
+    private var resLayoutProjectedAppId: Int = 0
 
     private var resLayoutGhFacetBarId: Int = 0
     private var resIdStatusBarId: Int = 0
@@ -196,6 +197,10 @@ object AaUiHook: AaHook() {
 
         resLayoutLeftResourceId = InitFields.appContext.resources.getIdentifier("sys_ui_layout_canonical_vertical_rail_lhd", "layout", InitFields.appContext.packageName)
         resLayoutRightResourceId = InitFields.appContext.resources.getIdentifier("sys_ui_layout_canonical_vertical_rail_rhd", "layout", InitFields.appContext.packageName)
+        // The layout Android Auto uses when only the projected app is on screen: it has no rail and no
+        // car UI of its own, which is what keeps the touches of the left edge from reaching Android
+        // Auto's rail and its notification view.
+        resLayoutProjectedAppId = InitFields.appContext.resources.getIdentifier("sys_ui_layout_projected_app", "layout", InitFields.appContext.packageName)
 
         canHookLayout = resLayoutLeftResourceId != 0 && resLayoutRightResourceId != 0
         if (!canHookLayout) {
@@ -678,10 +683,19 @@ object AaUiHook: AaHook() {
             val overrideId = if (!overrideName.isNullOrBlank()) {
                 InitFields.appContext.resources.getIdentifier(overrideName, "layout", InitFields.appContext.packageName)
             } else 0
-            // Keep Android Auto's rail layout in full screen: it is the only variant for which
-            // Android Auto builds the app decor (CarUiEntry) that AADisplay uses to open itself.
-            // The rail is removed and the app area widened below, after the layout is inflated.
-            param.args[0] = if (noRail && overrideId != 0) overrideId else railLayout
+            // The projected app layout is used whenever the rail is not wanted. Keeping Android Auto's
+            // rail layout and only hiding the rail is not enough: Android Auto keeps the rail - and the
+            // region under it - in its car UI, so the touches of the left edge reach its rail and open
+            // its notification view. `sys_ui_layout_projected_app` has no rail at all, and the app area
+            // it gives the projected app is the whole display. Android Auto builds its app decor
+            // (CarUiEntry) only for the rail layout, but auto-open does not use that entry point any
+            // more - AADisplay opens itself through the car API - so the rail layout is not needed.
+            val projectedAppLayoutId = if (isRightHandDrive) resLayoutRightResourceId else resLayoutProjectedAppId
+            param.args[0] = when {
+                noRail && overrideId != 0 -> overrideId
+                noRail && resLayoutProjectedAppId != 0 -> projectedAppLayoutId
+                else -> railLayout
+            }
             // Force canonical vertical rail for LHD/RHD.
             setLayoutTypeArg(param.args, if (isRightHandDrive) 3 else 2)
             if (param.args.size > 5 && param.args[5] is Boolean) {

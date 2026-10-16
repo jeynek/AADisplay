@@ -309,3 +309,15 @@
   Android Auto overwrites that state on its own. The current layout of the window is checked now, the
   window view is checked for `GONE` as well, and a layout that Android Auto rejected is applied again
   up to three times (100 ms apart) before the rail view itself is hidden.
+
+### Fixed
+- The touches of the left edge no longer reach Android Auto when the rail is hidden. Hiding the rail
+  window (`GhFacetBar`) was not enough: Android Auto kept its rail layout in use, and the region under
+  the rail stayed Android Auto's, so a touch there opened its notification view. Android Auto's
+  `sys_ui_layout_projected_app` is used as the car UI layout whenever the rail is not wanted now: it has
+  no rail at all and hands the projected app the whole display. This also removes the empty strip the
+  rail layout used to reserve. Verified on a Pixel-class head unit through the Desktop Head Unit:
+  switching the car between day and night mode - which rebuilds Android Auto's car UI and used to bring
+  the left edge block back every time - no longer takes the touches of the launcher.
+  `FullscreenLayout` still overrides the layout resource, and setting it to
+  `sys_ui_layout_canonical_vertical_rail_lhd` restores the previous behaviour.
