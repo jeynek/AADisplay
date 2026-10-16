@@ -18,6 +18,7 @@ import android.widget.Toast
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.net.toUri
 import androidx.core.view.MenuProvider
+import androidx.core.widget.doAfterTextChanged
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputLayout
@@ -257,6 +258,12 @@ class MainActivity :
                 validateDensitySelection(showError = false)
                 updateSaveButtonState()
             }
+            // Typing does not go through the item click listener, so the Save button would not notice
+            // a value that was entered by hand.
+            doAfterTextChanged {
+                validateDensitySelection(showError = false)
+                updateSaveButtonState()
+            }
         }
 
         baseBinding.actvLecoMinWidth.apply {
@@ -264,6 +271,18 @@ class MainActivity :
                 validateMinWidthSelection(showError = false)
                 updateSaveButtonState()
             }
+            doAfterTextChanged {
+                validateMinWidthSelection(showError = false)
+                updateSaveButtonState()
+            }
+        }
+
+        // The settings activity is translucent and an overlay (the launcher draws in its own window on
+        // top of the phone screen) can take the focus without warning, which drops a value the user has
+        // just typed. Re-checking the fields whenever the screen gets the focus back keeps the Save
+        // button in sync with what the fields actually contain.
+        baseBinding.ll.viewTreeObserver.addOnWindowFocusChangeListener { hasFocus ->
+            if (hasFocus) updateSaveButtonState()
         }
 
         baseBinding.btnSave.setOnClickListener {
@@ -322,7 +341,10 @@ class MainActivity :
         if (selectedMinWidth != null) {
             baseBinding.actvLecoMinWidth.setText(selectedMinWidth.label, false)
         } else {
-            baseBinding.actvLecoMinWidth.setText(if (savedLecoMinWidth == 0) "" else "$savedLecoMinWidth", false)
+            baseBinding.actvLecoMinWidth.setText(
+                if (savedLecoMinWidth == 0) getString(R.string.leco_min_width_from_theme) else "$savedLecoMinWidth",
+                false
+            )
         }
 
         validateLauncherSelection()
