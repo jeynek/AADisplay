@@ -38,8 +38,10 @@ sealed class AADisplayConfig<T>(val key: String) {
     object ForceRightAngle: BooleanConfig("ForceRightAngle", true)
     object DisplayImePolicy: IntConfig("DisplayImePolicy", 0) //WindowManager.DISPLAY_IME_POLICY_LOCAL:0, WindowManager.DISPLAY_IME_POLICY_FALLBACK_DISPLAY:1
     /**
-     * Overrides the `minimum_width` of the LecoAuto theme. LecoAuto scales its desktop with that value
-     * and only accepts it between 200 and 1000; 0 keeps the value of the theme.
+     * Overrides the minimum width of the LecoAuto desktop and applies it when the launcher starts:
+     * the value is written into LecoAuto's own `minimum_width` setting (which is what its settings
+     * screen shows and what wins over the value in the theme). The launcher only accepts `200..1000`
+     * for the theme value, the stored setting has no such limit; `0` leaves LecoAuto alone.
      */
     object LecoMinWidth: IntConfig("LecoMinWidth", 0)
     object VoiceAssistShell: StringConfig("VoiceAssistShell", null)

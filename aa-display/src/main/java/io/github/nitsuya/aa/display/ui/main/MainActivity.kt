@@ -623,7 +623,7 @@ class MainActivity :
 
     private fun validateMinWidthSelection(showError: Boolean): Boolean {
         val value = resolveSelectedMinWidth()
-        val valid = value != null && (value == 0 || value in 200..1000)
+        val valid = value != null && value >= 0
         if (!valid && showError) {
             baseBinding.tilLecoMinWidth.error = getString(R.string.leco_min_width_invalid)
         } else if (valid) {

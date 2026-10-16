@@ -37,9 +37,9 @@
     <string name="display_density_from_aa">From Android Auto</string>
     <string name="display_density_invalid">Select a valid Screen Density</string>
     <string name="leco_min_width_title">LecoAuto Min Width</string>
-    <string name="leco_min_width_summary">Overrides the minimum width of the LecoAuto theme, the launcher scales its desktop with it. \"From theme\" keeps the value of the theme.</string>
+    <string name="leco_min_width_summary">Writes the minimum width of the LecoAuto desktop into the launcher\'s own setting (the value its settings screen shows) and applies it the next time the launcher starts. 0 leaves the launcher alone.</string>
     <string name="leco_min_width_from_theme">From theme</string>
-    <string name="leco_min_width_invalid">Select a valid Min Width</string>
+    <string name="leco_min_width_invalid">Enter a number, 0 keeps the launcher\'s own value</string>
     <string name="hide_aa_rail_title">Hide Android Auto Rail</string>
     <string name="hide_aa_rail_summary">Hides Android Auto\'s own left rail - the status icons and its facet buttons - in every mode and stops it from taking the touches of the left edge. Android Auto only draws the rail of a car screen it manages itself, this app does not need it.</string>
     <string name="delay_60_seconds">60 Seconds</string>
