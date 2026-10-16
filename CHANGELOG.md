@@ -297,3 +297,11 @@
 
 ### Compatibility
 - Validated behavior against Android Auto 16.6 and device-side testing with real head unit workflow.
+
+### Fixed
+- The rail no longer comes back when Android Auto rebuilds its car UI (observed when switching the car
+  between day and night mode) or when a notification makes it re-apply the layout of its rail window:
+  the watchdog used to skip the work whenever the rail was in the state it thought it had set, but
+  Android Auto overwrites that state on its own. The current layout of the window is checked now, the
+  window view is checked for `GONE` as well, and a layout that Android Auto rejected is applied again
+  up to three times (100 ms apart) before the rail view itself is hidden.

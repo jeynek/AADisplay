@@ -79,13 +79,20 @@ object AaUiHook: AaHook() {
 
     /**
      * How often the rail window state is re-applied. Android Auto rebuilds the window when the
-     * projection restarts and this is the window that eats the touches of the left edge, so it is
-     * checked often enough that a rebuilt rail cannot be used for long.
+     * projection restarts - and rewrites its layout when it switches the car between day and night
+     * mode, both of which bring the rail back - so it is checked often enough that a rail cannot be
+     * used for long. The rail is the window that eats the touches of the left edge.
      */
     private const val FACET_BAR_WATCHDOG_INTERVAL_MS = 250L
 
     private const val VIEW_ROOT_IMPL = "android.view.ViewRootImpl"
     private const val VIEW_MANAGER_GLOBAL = "android.view.WindowManagerGlobal"
+
+    /** How soon the rail window layout is applied again when Android Auto overwrote it. */
+    private const val FACET_BAR_REAPPLY_DELAY_MS = 100L
+
+    /** How many times the layout is applied again before the rail view is hidden instead. */
+    private const val MAX_FACET_BAR_APPLY_ATTEMPTS = 3
 
     /** Original width/height of id/activity, kept so the full screen state can be reverted. */
     private var mActivityOriginalSize: IntArray? = null
@@ -97,6 +104,7 @@ object AaUiHook: AaHook() {
     private var mFacetBarWindow = WeakReference<View>(null)
     private var mFacetBarParams: WindowManager.LayoutParams? = null
     private var mFacetBarMissing = false
+    private var mFacetBarApplyAttempt = 0
     private val mWatchdogRunning = java.util.concurrent.atomic.AtomicBoolean(false)
 
     private val mMainHandler by lazy { Handler(Looper.getMainLooper()) }
@@ -566,17 +574,24 @@ object AaUiHook: AaHook() {
                 } catch (t: Throwable) {
                     log(tagName, "facet bar watchdog failed", t)
                 }
-                mMainHandler.postDelayed(this, FACET_BAR_WATCHDOG_INTERVAL_MS)
+                mMainHandler.postDelayed(this, facetBarWatchdogIntervalMs())
             }
-        }, FACET_BAR_WATCHDOG_INTERVAL_MS)
+        }, facetBarWatchdogIntervalMs())
     }
+
+    /** 250 ms while the rail has to be hidden, 2 s while it only has to be kept visible. */
+    private fun facetBarWatchdogIntervalMs(): Long =
+        if (AADisplayConfig.HideAaRail.get(mConfig)) FACET_BAR_WATCHDOG_INTERVAL_MS else 2000L
 
     /**
      * Keeps Android Auto's rail window invisible and non-touchable. The rail is never wanted - the
      * launcher shows what the car screen has to show - and it is the window that eats the touches of
-     * the left edge, so it is hidden in every mode and not only in full screen. The window is
-     * recreated when Android Auto restarts the projection, so a detached view is stale and the window
-     * has to be looked up again.
+     * the left edge, so it is hidden in every mode and not only in full screen.
+     *
+     * The window is not only recreated when the projection restarts: Android Auto also re-applies its
+     * own layout of the window (for example when it switches the car between day and night mode, which
+     * rebuilds its car UI), and that overwrites both the flags and the alpha. The view is therefore
+     * checked as well and the layout update is retried until the state sticks.
      */
     private fun applyFacetBarWindowState() {
         val hide = AADisplayConfig.HideAaRail.get(mConfig)
@@ -584,6 +599,7 @@ object AaUiHook: AaHook() {
         if (!hide && mFacetBarWindow.get() == null) return
         if (mFacetBarWindow.get()?.isAttachedToWindow != true) {
             mFacetBarWindow.clear()
+            mFacetBarParams = null
             if (!findFacetBarRoot()) {
                 if (hide && !mFacetBarMissing) {
                     mFacetBarMissing = true
@@ -600,9 +616,11 @@ object AaUiHook: AaHook() {
         val wanted = if (hide) windowParams.flags or ignoreTouch or ignoreFocus
         else windowParams.flags and (ignoreTouch or ignoreFocus).inv()
         val wantedAlpha = if (hide) 0f else 1f
-        if (windowParams.flags == wanted && windowParams.alpha == wantedAlpha) return
+        val hiddenView = hide && view.visibility == View.GONE
+        if (windowParams.flags == wanted && windowParams.alpha == wantedAlpha && !hiddenView) return
         windowParams.flags = wanted
         windowParams.alpha = wantedAlpha
+        mFacetBarApplyAttempt = 0
         val updated = runCatching {
             (InitFields.appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager)
                 .updateViewLayout(view, windowParams)
@@ -613,8 +631,29 @@ object AaUiHook: AaHook() {
             // Hiding the root view makes the window manager drop the window, this also works when
             // the layout could not be updated.
             view.visibility = if (hide) View.GONE else View.VISIBLE
+        } else {
+            // Android Auto may apply its own layout right after this update, so the result is checked
+            // on the next watchdog ticks instead of trusting this single call.
+            val rejected = if (hide) {
+                windowParams.alpha != 0f || windowParams.flags and ignoreTouch == 0
+            } else {
+                windowParams.alpha == 0f || windowParams.flags and ignoreTouch != 0
+            }
+            if (rejected) {
+                mFacetBarApplyAttempt++
+                if (mFacetBarApplyAttempt <= MAX_FACET_BAR_APPLY_ATTEMPTS) {
+                    mMainHandler.postDelayed({ applyFacetBarWindowState() }, FACET_BAR_REAPPLY_DELAY_MS)
+                } else {
+                    log(
+                        tagName,
+                        "facet bar window rejected its layout $mFacetBarApplyAttempt times, hiding its view"
+                    )
+                    view.visibility = if (hide) View.GONE else View.VISIBLE
+                    mFacetBarApplyAttempt = 0
+                }
+            }
         }
-        log(tagName, "facet bar window ${if (hide) "hidden" else "shown"}")
+        log(tagName, "facet bar window ${if (hide) "hidden" else "shown"} (attempt=$mFacetBarApplyAttempt)")
     }
 
     private fun hookLayout() {
