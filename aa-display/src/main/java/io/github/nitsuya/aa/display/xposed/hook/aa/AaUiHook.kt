@@ -77,9 +77,12 @@ object AaUiHook: AaHook() {
     /** Window title Android Auto gives its rail window. */
     private const val FACET_BAR_WINDOW_TITLE = "GhFacetBar"
 
-    /** How often the rail window lookup is retried before giving up, and with which delay. */
-    private const val FACET_BAR_LOOKUP_ATTEMPTS = 40
-    private const val FACET_BAR_LOOKUP_DELAY_MS = 500L
+    /**
+     * How often the rail window state is re-applied. Android Auto rebuilds the window when the
+     * projection restarts and this is the window that eats the touches of the left edge, so it is
+     * checked often enough that a rebuilt rail cannot be used for long.
+     */
+    private const val FACET_BAR_WATCHDOG_INTERVAL_MS = 250L
 
     private const val VIEW_ROOT_IMPL = "android.view.ViewRootImpl"
     private const val VIEW_MANAGER_GLOBAL = "android.view.WindowManagerGlobal"
@@ -93,7 +96,8 @@ object AaUiHook: AaHook() {
     /** Android Auto's rail window, captured when it is added. */
     private var mFacetBarWindow = WeakReference<View>(null)
     private var mFacetBarParams: WindowManager.LayoutParams? = null
-    private var mFacetBarLookups = 0
+    private var mFacetBarMissing = false
+    private val mWatchdogRunning = java.util.concurrent.atomic.AtomicBoolean(false)
 
     private val mMainHandler by lazy { Handler(Looper.getMainLooper()) }
 
@@ -234,6 +238,7 @@ object AaUiHook: AaHook() {
             hookFacetBar(config)
         }
         hookFacetBarWindow()
+        startFacetBarWatchdog()
         hookRadius(config)
     }
 
@@ -496,12 +501,14 @@ object AaUiHook: AaHook() {
     }
 
     private fun captureFacetBarWindow(view: View, windowParams: WindowManager.LayoutParams) {
-        log(tagName, "facet bar window captured")
         mFacetBarWindow = WeakReference(view)
         mFacetBarParams = windowParams
+        // Android Auto builds this window again whenever it restarts the projection, so the state is
+        // applied every time it appears and not only when the full screen state changes.
+        mMainHandler.post { applyFacetBarWindowState() }
     }
 
-    /** Finds Android Auto's rail window in the window manager, it is added before the hooks run. */
+    /** Finds Android Auto's rail window in the window manager, it can be added before the hooks run. */
     private fun findFacetBarRoot(): Boolean {
         return runCatching {
             val windowManagerGlobal = loadClass(VIEW_MANAGER_GLOBAL)
@@ -513,7 +520,8 @@ object AaUiHook: AaHook() {
                 val view = candidate as? View ?: continue
                 val windowParams = view.layoutParams as? WindowManager.LayoutParams ?: continue
                 if (windowParams.title?.toString() != FACET_BAR_WINDOW_TITLE) continue
-                captureFacetBarWindow(view, windowParams)
+                mFacetBarWindow = WeakReference(view)
+                mFacetBarParams = windowParams
                 return true
             }
             return false
@@ -523,28 +531,47 @@ object AaUiHook: AaHook() {
     }
 
     /**
-     * Android Auto adds its rail window some time after the car UI is inflated, so a failed lookup
-     * is retried instead of leaving the rail visible.
+     * Android Auto adds its rail window some time after the car UI is inflated and rebuilds it
+     * whenever the projection restarts - which also happens when the launcher is restarted - and the
+     * rebuilt bar takes the touches of the left edge of the projected app again. The state is
+     * therefore re-applied periodically and not only on a full screen change.
      */
-    private fun retryFacetBarWindowState() {
-        if (mFacetBarLookups++ >= FACET_BAR_LOOKUP_ATTEMPTS) return
-        mMainHandler.postDelayed({ applyFacetBarWindowState() }, FACET_BAR_LOOKUP_DELAY_MS)
+    private fun startFacetBarWatchdog() {
+        if (!mWatchdogRunning.compareAndSet(false, true)) return
+        mMainHandler.postDelayed(object : Runnable {
+            override fun run() {
+                try {
+                    applyFacetBarWindowState()
+                } catch (t: Throwable) {
+                    log(tagName, "facet bar watchdog failed", t)
+                }
+                mMainHandler.postDelayed(this, FACET_BAR_WATCHDOG_INTERVAL_MS)
+            }
+        }, FACET_BAR_WATCHDOG_INTERVAL_MS)
     }
 
+    /**
+     * Keeps Android Auto's rail window invisible and non-touchable while the app area is widened. The
+     * window is recreated when Android Auto restarts the projection, so a detached view is stale and
+     * the window has to be looked up again.
+     */
     private fun applyFacetBarWindowState() {
-        // The window is recreated when Android Auto restarts the projection, so a detached view is
-        // stale and has to be looked up again.
+        val hide = isNoRailPreferred(mConfig)
+        // Nothing to restore and nothing to hide: no reason to walk the window list every second.
+        if (!hide && mFacetBarWindow.get() == null) return
         if (mFacetBarWindow.get()?.isAttachedToWindow != true) {
             mFacetBarWindow.clear()
             if (!findFacetBarRoot()) {
-                retryFacetBarWindowState()
+                if (hide && !mFacetBarMissing) {
+                    mFacetBarMissing = true
+                    log(tagName, "facet bar window not up yet, waiting for it")
+                }
                 return
             }
         }
+        mFacetBarMissing = false
         val view = mFacetBarWindow.get() ?: return
         val windowParams = mFacetBarParams ?: return
-        mFacetBarLookups = 0
-        val hide = isNoRailPreferred(mConfig)
         val ignoreTouch = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         val ignoreFocus = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         val wanted = if (hide) windowParams.flags or ignoreTouch or ignoreFocus

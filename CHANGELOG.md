@@ -55,8 +55,13 @@
   `AaUiHook` now finds that window (`WindowManagerGlobal.mViews`, matched by `WindowManager.LayoutParams
   .title`), sets it to `alpha = 0` with `FLAG_NOT_TOUCHABLE | FLAG_NOT_FOCUSABLE` and falls back to
   `View.GONE` if the layout update fails, and the rail view of the car UI is also set to `INVISIBLE`.
-  Android Auto adds the window shortly after the car UI is inflated, so the lookup is retried
-  (40 attempts, 500 ms apart) instead of leaving the rail visible.
+  Android Auto adds the window shortly after the car UI is inflated, so the lookup is also retried.
+- The rail window state is re-applied every 250 ms and whenever Android Auto rebuilds the window.
+  Android Auto recreates the rail together with the projection, which happens on every Android Auto
+  restart and also when the launcher is restarted, and the recreated bar is visible and touchable
+  again: without the watchdog the rail came back and stole the touches of the left edge until the
+  full screen state changed. The state is cheap to check - the flags of a window layout that is
+  already correct are left alone - and the lookup is skipped entirely while there is nothing to hide.
 
 ### Added
 - Full screen mode for the launcher that drives the projection: the `hide-aadisplay-facet-bar` work.
@@ -101,6 +106,11 @@
     although it still renders the status icons and the facet glyphs before it, and the same content
     that used to sit in the left strip of the projected car screen is gone,
   - leaving full screen restores the rail (`facet bar window shown`, `app area restored with the rail`),
+  - restarting Android Auto while full screen stayed enabled (`am force-stop
+    com.google.android.projection.gearhead`, head unit server again): the rebuilt `GhFacetBar` window is
+    hidden again right away (`facet bar window not up yet, waiting for it`, then
+    `facet bar window hidden`) although `leco_fullscreen` was never touched, and `dumpsys window` reports
+    the new window with `alpha=0.0` and `fl=... NOT_TOUCHABLE NOT_FOCUSABLE`,
   - `dumpsys input` reports the projection displays as interactive while the phone screen is off, and
     the touches of the Desktop Head Unit keep reaching the launcher in that state.
 
